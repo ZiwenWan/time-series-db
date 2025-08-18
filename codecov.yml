@@ -1,0 +1,24 @@
+codecov:
+  require_ci_to_pass: yes
+
+coverage:
+  status:
+    project:
+      default:
+        target: 75%  # Require 75% overall coverage
+        threshold: 1%  # Allow 1% decrease
+    patch:
+      default:
+        target: 80%  # Require 80% coverage on new code
+        threshold: 1%  # Allow 1% decrease on patches
+
+comment:
+  layout: "header, diff, flags, files"
+  behavior: default
+  require_changes: false
+  require_base: false
+
+ignore:
+  - "src/test/**/*"  # Ignore test files from coverage
+  - "build/**/*"     # Ignore build artifacts
+  - "benchmarks/**/*" # Ignore benchmark files

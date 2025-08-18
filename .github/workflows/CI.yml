@@ -1,0 +1,79 @@
+name: Build And Test Plugin
+
+on:
+  pull_request:
+    branches:
+      - "*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    name: Build & Format Check
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up JDK 21
+      uses: actions/setup-java@v4
+      with:
+        java-version: 21
+        distribution: temurin
+    - name: Cache Gradle packages
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+    - name: Code Quality Verification Checks
+      run: ./gradlew check -x test
+    - name: Build
+      run: ./gradlew assemble
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-artifacts
+        path: build/libs/
+
+  tests:
+    runs-on: ubuntu-latest
+    name: Test & Upload Code Coverage
+    needs: build
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up JDK 21
+      uses: actions/setup-java@v4
+      with:
+        java-version: 21
+        distribution: temurin
+    - name: Cache Gradle packages
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+    - name: Run Unit Tests and Generate Code Coverage Report
+      run: ./gradlew test
+    - name: Run Integration Tests
+      run: ./gradlew integTest
+    - name: Upload Coverage Report to Codecov
+      if: success() && env.CODECOV_TOKEN != ''
+      uses: codecov/codecov-action@v5
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        file: ./build/reports/jacoco/test/jacocoTestReport.xml
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+      env:
+        CODECOV_TOKEN: ${{secrets.CODECOV_TOKEN}}
+    - name: Codecov upload skipped
+      if: success() && env.CODECOV_TOKEN == ''
+      run: echo "Codecov upload skipped - CODECOV_TOKEN not configured"

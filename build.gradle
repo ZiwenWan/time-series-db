@@ -34,7 +34,7 @@ buildscript {
     }
     dependencies {
         classpath "${opensearch_group}.gradle:build-tools:${opensearch_version}"
-        classpath "com.diffplug.spotless:spotless-plugin-gradle:6.25.0"
+        classpath "com.diffplug.spotless:spotless-plugin-gradle:7.2.1"
     }
 }
 
@@ -106,24 +106,21 @@ afterEvaluate {
     project.validateNebulaPom.enabled = false
 }
 
-
-compileJava {
-    dependsOn spotlessApply
-}
-
 task integTest(type: RestIntegTestTask) {
     description = "Run tests against a cluster"
     testClassesDirs = sourceSets.test.output.classesDirs
     classpath = sourceSets.test.runtimeClasspath
 }
-tasks.named("check").configure { dependsOn(integTest) }
-tasks.named("check").configure { dependsOn(spotlessCheck) }
 
 integTest {
     // The --debug-jvm command-line option makes the cluster debuggable; this makes the tests debuggable
     if (System.getProperty("test.debug") != null) {
         jvmArgs '-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=*:5005'
     }
+}
+
+javadoc {
+   options.addStringOption('Xdoclint:all', '-quiet')
 }
 
 
@@ -143,3 +140,22 @@ testClusters.integTest {
 run {
     useCluster testClusters.integTest
 }
+
+jacocoTestReport {
+    reports {
+        html.required = true
+        xml.required = true
+    }
+}
+test.finalizedBy(project.tasks.jacocoTestReport)
+
+jacocoTestCoverageVerification {
+    violationRules {
+        rule {
+            limit {
+                minimum = 0.75
+            }
+        }
+    }
+}
+tasks.named("check").configure { dependsOn(jacocoTestCoverageVerification) }
