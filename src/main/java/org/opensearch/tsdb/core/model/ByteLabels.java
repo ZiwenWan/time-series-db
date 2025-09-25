@@ -15,7 +15,13 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
+
+import static org.opensearch.tsdb.core.model.LabelConstants.COLON_SEPARATOR;
+import static org.opensearch.tsdb.core.model.LabelConstants.EMPTY_STRING;
+import static org.opensearch.tsdb.core.model.LabelConstants.SPACE_SEPARATOR;
 
 /**
  * ByteLabels implements Labels using a space-efficient flat byte array encoding.
@@ -43,13 +49,10 @@ public class ByteLabels implements Labels {
 
     private static final ByteLabels EMPTY = new ByteLabels(new byte[0]);
 
-    /** Constants used in toKeyValueString method */
-    private static final String EMPTY_STRING = "";
-    private static final char SPACE_SEPARATOR = ' ';
-    private static final char COLON_SEPARATOR = ':';
-
     /** ThreadLocal cache for TreeMap instances to reduce object allocation during label creation. */
     private static final ThreadLocal<TreeMap<String, String>> TREE_MAP_CACHE = ThreadLocal.withInitial(TreeMap::new);
+
+    private static final char DELIMITER = COLON_SEPARATOR;
 
     private ByteLabels(byte[] data) {
         this.data = data;
@@ -260,7 +263,7 @@ public class ByteLabels implements Labels {
             DecodedString value = decodeString(data, pos);
             pos = value.nextPos;
 
-            sb.append(name.value).append(COLON_SEPARATOR).append(value.value);
+            sb.append(name.value).append(DELIMITER).append(value.value);
         }
 
         return sb.toString();
@@ -355,6 +358,23 @@ public class ByteLabels implements Labels {
     public int hashCode() {
         long stableHash = stableHash();
         return Long.hashCode(stableHash);
+    }
+
+    @Override
+    public Set<String> toIndexSet() {
+        TreeSet<String> result = new TreeSet<>();
+        int pos = 0;
+
+        while (pos < data.length) {
+            DecodedString name = decodeString(data, pos);
+            pos = name.nextPos;
+            DecodedString value = decodeString(data, pos);
+            pos = value.nextPos;
+
+            result.add(name.value + DELIMITER + value.value);
+        }
+
+        return result;
     }
 
     @Override

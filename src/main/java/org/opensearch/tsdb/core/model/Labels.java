@@ -8,6 +8,7 @@
 package org.opensearch.tsdb.core.model;
 
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Labels is a set of name/value pairs.
@@ -51,4 +52,10 @@ public interface Labels {
      * @return true if label exists
      */
     boolean has(String name);
+
+    /**
+     * Get set of labels in index format (key:value pairs using current delimiter - in this example ':')
+     * @return set of label strings formatted for indexing
+     */
+    Set<String> toIndexSet();
 }
