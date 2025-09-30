@@ -30,8 +30,8 @@ public final class LabelConstants {
     public static final char SPACE_SEPARATOR = ' ';
 
     /**
-     * Colon separator used to separate label name and value.
+     * Label delimiter used to delimit label name and value.
      */
-    public static final char COLON_SEPARATOR = ':';
+    public static final char LABEL_DELIMITER = ':'; // FIXME: use a special char to properly handle UTF-8 labels
 
 }

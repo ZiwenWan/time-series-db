@@ -7,6 +7,7 @@
  */
 package org.opensearch.tsdb.core.model;
 
+import org.apache.lucene.util.BytesRef;
 import java.util.Map;
 import java.util.Set;
 
@@ -20,6 +21,12 @@ public interface Labels {
      * @return string representation
      */
     String toKeyValueString();
+
+    /**
+     * Convert to array of key:value byte references
+     * @return array of BytesRef objects containing key:value pairs
+     */
+    BytesRef[] toKeyValueBytesRefs();
 
     /**
      * Get a read-only map view of the labels

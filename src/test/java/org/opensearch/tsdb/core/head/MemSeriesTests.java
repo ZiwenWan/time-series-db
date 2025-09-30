@@ -13,6 +13,8 @@ import org.opensearch.tsdb.core.model.Labels;
 import org.opensearch.tsdb.core.utils.Constants;
 
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class MemSeriesTests extends OpenSearchTestCase {
 
@@ -139,7 +141,7 @@ public class MemSeriesTests extends OpenSearchTestCase {
         assertFalse(series.getPendingCleanup());
         assertEquals(0L, series.getMaxMMapTimestamp());
 
-        // Test setPendingGC and getPendingGC
+        // Test setPendingCleanup and getPendingCleanup
         series.setPendingCleanup(true);
         assertTrue(series.getPendingCleanup());
         series.setPendingCleanup(false);
@@ -230,6 +232,41 @@ public class MemSeriesTests extends OpenSearchTestCase {
         assertEquals("Two chunks", 2, series.getHeadChunk().len());
         assertEquals("First chunk has 5 samples", 5, series.getHeadChunk().oldest().getChunk().numSamples());
         assertEquals("Second chunk has 4 samples", 4, series.getHeadChunk().getChunk().numSamples());
+    }
+
+    public void testAwaitPersistedAndMarkPersisted() throws InterruptedException {
+        Labels labels = ByteLabels.fromStrings("k1", "v1", "k2", "v2");
+        MemSeries series = new MemSeries(123L, labels);
+        final AtomicBoolean threadCompleted = new AtomicBoolean(false);
+        final AtomicReference<Exception> threadException = new AtomicReference<>();
+
+        Thread waitingThread = new Thread(() -> {
+            try {
+                series.awaitPersisted();
+                threadCompleted.set(true);
+            } catch (InterruptedException e) {
+                threadException.set(e);
+            }
+        });
+        waitingThread.start();
+        waitUntil(() -> waitingThread.getState() == Thread.State.WAITING);
+        assertFalse("Thread should be blocked before markPersisted is called", threadCompleted.get());
+
+        // Mark persisted
+        series.markPersisted();
+
+        waitingThread.join(1000);
+        assertTrue("Thread should complete after markPersisted is called", threadCompleted.get());
+        assertNull("Thread should not have thrown an InterruptedException", threadException.get());
+
+        waitUntil(() -> {
+            try {
+                series.awaitPersisted();
+                return true;
+            } catch (InterruptedException e) {
+                return false;
+            }
+        });
     }
 
     private MemSeries createMemSeries(int chunkCount) {

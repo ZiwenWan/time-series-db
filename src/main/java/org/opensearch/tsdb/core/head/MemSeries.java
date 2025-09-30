@@ -16,6 +16,7 @@ import org.opensearch.tsdb.core.utils.Constants;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
@@ -43,7 +44,12 @@ public class MemSeries {
     // Appender for the head chunk
     private ChunkAppender chunkAppender;
 
-    // true if the series was previously empty in a cleanup cycle, may be removed in the next cycle
+    // Indicates if the series labels have been written to the translog
+    private final CountDownLatch firstWriteLatch = new CountDownLatch(1);
+
+    // The seqNo corresponding to the most recent operation appended to this series
+    private long maxSeqNo;
+
     private boolean pendingCleanup;
 
     /**
@@ -293,5 +299,36 @@ public class MemSeries {
      */
     private long rangeForTimestamp(long t, long chunkRange) {
         return (t / chunkRange) * chunkRange + chunkRange;
+    }
+
+    /**
+     * Wait until the series is marked as persisted. Should only be called by threads other which did not create the series.
+     * @throws InterruptedException if the thread is interrupted while waiting
+     */
+    public void awaitPersisted() throws InterruptedException {
+        firstWriteLatch.await();
+    }
+
+    /**
+     * Mark the series as persisted. Should only be called by the thread which created the series, after receiving a translog location.
+     */
+    public void markPersisted() {
+        firstWriteLatch.countDown();
+    }
+
+    /**
+     * Get the maximum sequence number for this series.
+     * @return the maximum sequence number
+     */
+    public long getMaxSeqNo() {
+        return maxSeqNo;
+    }
+
+    /**
+     * Set the maximum sequence number for this series.
+     * @param maxSeqNo the maximum sequence number to set
+     */
+    public void setMaxSeqNo(long maxSeqNo) {
+        this.maxSeqNo = maxSeqNo;
     }
 }

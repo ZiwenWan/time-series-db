@@ -60,7 +60,7 @@ public final class IndexUtils {
             String labelString = term.utf8ToString();
 
             // Parse "key:value" format (labels are stored with colon separator)
-            int delimiterIndex = labelString.indexOf(LabelConstants.COLON_SEPARATOR);
+            int delimiterIndex = labelString.indexOf(LabelConstants.LABEL_DELIMITER);
             if (delimiterIndex > 0 && delimiterIndex < labelString.length() - 1) {
                 String key = labelString.substring(0, delimiterIndex);
                 String value = labelString.substring(delimiterIndex + 1);

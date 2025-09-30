@@ -7,6 +7,7 @@
  */
 package org.opensearch.tsdb.core.model;
 
+import org.apache.lucene.util.BytesRef;
 import org.opensearch.common.hash.MurmurHash3;
 
 import java.io.ByteArrayOutputStream;
@@ -14,12 +15,13 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 
-import static org.opensearch.tsdb.core.model.LabelConstants.COLON_SEPARATOR;
+import static org.opensearch.tsdb.core.model.LabelConstants.LABEL_DELIMITER;
 import static org.opensearch.tsdb.core.model.LabelConstants.EMPTY_STRING;
 import static org.opensearch.tsdb.core.model.LabelConstants.SPACE_SEPARATOR;
 
@@ -52,8 +54,6 @@ public class ByteLabels implements Labels {
     /** ThreadLocal cache for TreeMap instances to reduce object allocation during label creation. */
     private static final ThreadLocal<TreeMap<String, String>> TREE_MAP_CACHE = ThreadLocal.withInitial(TreeMap::new);
 
-    private static final char DELIMITER = COLON_SEPARATOR;
-
     private ByteLabels(byte[] data) {
         this.data = data;
     }
@@ -78,6 +78,58 @@ public class ByteLabels implements Labels {
         }
 
         return encodeLabels(sorted);
+    }
+
+    /**
+     * Creates a ByteLabels instance from a sorted array of alternating name-value strings.
+     * @param labels an array where even indices are names and odd indices are values,
+     *               sorted by name (e.g., "name1", "value1", "name2", "value2")
+     * @return a new ByteLabels instance with the given labels
+     * @throws IllegalArgumentException if the array length is not even (unpaired labels)
+     */
+    public static ByteLabels fromSortedStrings(String... labels) {
+        if (labels == null) {
+            return EMPTY;
+        }
+
+        if (labels.length % 2 != 0) {
+            throw new IllegalArgumentException("Labels must be in pairs");
+        }
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        try {
+            for (int i = 0; i < labels.length; i += 2) {
+                appendEncodedString(baos, labels[i]);
+                appendEncodedString(baos, labels[i + 1]);
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to encode labels", e);
+        }
+        return new ByteLabels(baos.toByteArray());
+    }
+
+    /**
+     * Creates a ByteLabels instance from a sorted array of key:value String pairs
+     * @param keyValuePairs pairs to encode, delimited by {@link LabelConstants#LABEL_DELIMITER}
+     * @return a new ByteLabels instance with the given labels
+     */
+    public static ByteLabels fromSortedKeyValuePairs(List<String> keyValuePairs) {
+        if (keyValuePairs == null || keyValuePairs.isEmpty()) {
+            return EMPTY;
+        }
+
+        String[] splitPairs = new String[keyValuePairs.size() * 2];
+        for (int i = 0; i < keyValuePairs.size(); i++) {
+            String pair = keyValuePairs.get(i);
+            int delimiterIndex = pair.indexOf(LabelConstants.LABEL_DELIMITER);
+            if (delimiterIndex <= 0 || delimiterIndex >= pair.length() - 1) {
+                throw new IllegalArgumentException("Invalid key value pair: " + pair);
+            }
+            splitPairs[i * 2] = pair.substring(0, delimiterIndex);
+            splitPairs[i * 2 + 1] = pair.substring(delimiterIndex + 1);
+        }
+
+        return fromSortedStrings(splitPairs);
     }
 
     /**
@@ -209,6 +261,24 @@ public class ByteLabels implements Labels {
     }
 
     /**
+     * Decodes byte references for a name-value pair without creating intermediate String objects.
+     * This is more efficient for operations that need to work directly with the underlying bytes.
+     *
+     * @param data the byte array containing encoded strings
+     * @param pos the position to start decoding from
+     * @return a DecodedByteRefs containing BytesRef objects for name and value, and the next position
+     */
+    private static DecodedByteRefs decodeByteRefs(byte[] data, int pos) {
+        StringPosition namePos = parseStringPos(data, pos);
+        StringPosition valuePos = parseStringPos(data, namePos.nextPos());
+
+        BytesRef nameRef = new BytesRef(data, namePos.dataStart(), namePos.length());
+        BytesRef valueRef = new BytesRef(data, valuePos.dataStart(), valuePos.length());
+
+        return new DecodedByteRefs(nameRef, valueRef, valuePos.nextPos());
+    }
+
+    /**
      * Compares a portion of the data array with a target byte array lexicographically.
      * This avoids string creation during label lookups for better performance.
      *
@@ -234,6 +304,16 @@ public class ByteLabels implements Labels {
      * @param nextPos the position in the byte array after this string's data
      */
     private record DecodedString(String value, int nextPos) {
+    }
+
+    /**
+     * Record representing decoded byte references for a name-value pair and the next position.
+     *
+     * @param nameRef BytesRef pointing to the name bytes
+     * @param valueRef BytesRef pointing to the value bytes
+     * @param nextPos the position in the byte array after both strings' data
+     */
+    private record DecodedByteRefs(BytesRef nameRef, BytesRef valueRef, int nextPos) {
     }
 
     /**
@@ -263,10 +343,42 @@ public class ByteLabels implements Labels {
             DecodedString value = decodeString(data, pos);
             pos = value.nextPos;
 
-            sb.append(name.value).append(DELIMITER).append(value.value);
+            sb.append(name.value).append(LabelConstants.LABEL_DELIMITER).append(value.value);
         }
 
         return sb.toString();
+    }
+
+    @Override
+    public BytesRef[] toKeyValueBytesRefs() {
+        if (data.length == 0) return new BytesRef[0];
+
+        // two pass approach was validated to be faster than using a List, but should be challenged with other datasets
+        int count = 0;
+        int pos = 0;
+        while (pos < data.length) {
+            pos = parseStringPos(data, parseStringPos(data, pos).nextPos()).nextPos();
+            count++;
+        }
+
+        BytesRef[] result = new BytesRef[count];
+        pos = 0;
+        int index = 0;
+
+        while (pos < data.length) {
+            DecodedByteRefs refs = decodeByteRefs(data, pos);
+            pos = refs.nextPos();
+
+            int totalLength = refs.nameRef().length + 1 + refs.valueRef().length;
+            byte[] combined = new byte[totalLength];
+            System.arraycopy(refs.nameRef().bytes, refs.nameRef().offset, combined, 0, refs.nameRef().length);
+            combined[refs.nameRef().length] = (byte) LABEL_DELIMITER;
+            System.arraycopy(refs.valueRef().bytes, refs.valueRef().offset, combined, refs.nameRef().length + 1, refs.valueRef().length);
+
+            result[index++] = new BytesRef(combined);
+        }
+
+        return result;
     }
 
     @Override
@@ -371,7 +483,7 @@ public class ByteLabels implements Labels {
             DecodedString value = decodeString(data, pos);
             pos = value.nextPos;
 
-            result.add(name.value + DELIMITER + value.value);
+            result.add(name.value + LabelConstants.LABEL_DELIMITER + value.value);
         }
 
         return result;
