@@ -11,6 +11,7 @@ import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.tsdb.lang.m3.stage.AliasStage;
 import org.opensearch.tsdb.lang.m3.stage.ScaleStage;
 import org.opensearch.tsdb.lang.m3.stage.SortStage;
+import org.opensearch.tsdb.lang.m3.stage.ValueFilterStage;
 
 import java.io.IOException;
 import java.lang.reflect.Method;
@@ -28,7 +29,7 @@ import java.util.function.Function;
  *
  * <h2>Supported Stage Types:</h2>
  * <ul>
- *   <li><strong>Unary Stages:</strong> scale, sort</li>
+ *   <li><strong>Unary Stages:</strong> scale, sort, valueFilter</li>
  * </ul>
  *
  * <h2>Usage Examples:</h2>
@@ -70,9 +71,10 @@ public class PipelineStageFactory {
         try {
             // For now, manually register known stages. In a full implementation,
             // this would use classpath scanning to find all annotated classes.
+            registerStage(AliasStage.class);
             registerStage(ScaleStage.class);
             registerStage(SortStage.class);
-            registerStage(AliasStage.class);
+            registerStage(ValueFilterStage.class);
         } catch (Exception e) {
             throw new RuntimeException("Failed to auto-register pipeline stages", e);
         }
