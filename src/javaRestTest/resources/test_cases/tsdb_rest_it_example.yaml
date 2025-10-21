@@ -1,0 +1,74 @@
+# TSDB REST Integration Test Example
+# Demonstrates M3QL query execution and validation via REST API
+
+test_setup:
+  name: "TSDB REST Integration Test Example"
+  description: "Example test setup for HTTP metrics with M3QL queries"
+
+  index_config:
+    name: "http_metrics_rest_test"
+    shards: 1
+    replicas: 0
+
+test_case:
+  name: "Simple HTTP Metrics Test"
+
+  # Input data: HTTP request metrics over 40 minutes
+  input_data:
+    input_data_type: FIXED_INTERVAL
+    time_config:
+      min_timestamp: "now-50m"
+      max_timestamp: "now-10m"
+      step: "10m"
+    metrics:
+      # GET requests with status 200
+      - labels: "__name__:http_requests_total,method:GET,status:200"
+        values: [100, 120, 110, 95, 105]
+
+      # GET requests with status 404
+      - labels: "__name__:http_requests_total,method:GET,status:404"
+        values: [10, 15, 12, null, 11]
+
+      # POST requests with status 200
+      - labels: "__name__:http_requests_total,method:POST,status:200"
+        values: [80, 85, 90, 75, 88]
+
+      # POST requests with status 500
+      - labels: "__name__:http_requests_total,method:POST,status:500"
+        values: [5, 3, 7, 4, 6]
+
+  # M3QL queries with expected results
+  queries:
+    - name: "sum_by_method_status"
+      type: "m3ql"
+      query: "fetch __name__:http_requests_total | sumSeries method status"
+      time_config:
+        min_timestamp: "now-60m"
+        max_timestamp: "now-10m"
+        step: "10m"
+      expected:
+        status: "success"
+        data:
+          - metric: {method: "GET", status: "200"}
+            values: [null, 100, 120, 110, 95, 105]
+          - metric: {method: "GET", status: "404"}
+            values: [null, 10, 15, 12, null, 11]
+          - metric: {method: "POST", status: "200"}
+            values: [null, 80, 85, 90, 75, 88]
+          - metric: {method: "POST", status: "500"}
+            values: [null, 5, 3, 7, 4, 6]
+
+    - name: "sum_by_method"
+      type: "m3ql"
+      query: "fetch __name__:http_requests_total | sumSeries method"
+      time_config:
+        min_timestamp: "now-50m"
+        max_timestamp: "now-10m"
+        step: "10m"
+      expected:
+        status: "success"
+        data:
+          - metric: {method: "GET"}
+            values: [110, 135, 122, 95, 116]  # GET 200 + GET 404
+          - metric: {method: "POST"}
+            values: [85, 88, 97, 79, 94]  # POST 200 + POST 500
