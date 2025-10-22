@@ -39,7 +39,7 @@ buildscript {
 }
 
 allprojects {
-    group = 'org.opensearch'
+    group = 'org.opensearch.plugin'
     version = opensearch_version.tokenize('-')[0] + '.0'
     if (buildVersionQualifier) {
         version += "-${buildVersionQualifier}"
@@ -177,6 +177,7 @@ test.finalizedBy(project.tasks.jacocoTestReport)
 test.finalizedBy(project.tasks.jacocoTestCoverageVerification)
 
 jacocoTestCoverageVerification {
+    dependsOn compileJava, processResources
     afterEvaluate {
         classDirectories.setFrom(files(classDirectories.files.collect {
             fileTree(dir: it, exclude: [
@@ -196,6 +197,7 @@ jacocoTestCoverageVerification {
 
 tasks.named("precommit").configure { dependsOn("spotlessCheck", "javadoc") }
 tasks.named("check").configure { dependsOn(jacocoTestCoverageVerification) }
+
 
 /**********************************************
  *            JavaCC Configuration            *
@@ -218,7 +220,7 @@ dependencies {
 
 configurations.all {
     resolutionStrategy {
-        // Cache store-subdirectory SNAPSHOT for 1 week (until Dec 16 release)
+        // Cache store-subdirectory SNAPSHOT until Dec 16 release
         cacheChangingModulesFor 63, 'days'
         // Dynamic version resolution
         cacheDynamicVersionsFor 10, 'minutes'
