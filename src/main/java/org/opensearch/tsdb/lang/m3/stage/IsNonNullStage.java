@@ -95,7 +95,6 @@ public class IsNonNullStage implements UnaryPipelineStage {
         // generation. Future enhancements will include validation or enforcement strategies to ensure
         // this alignment property is maintained throughout the pipeline.
 
-
         List<TimeSeries> result = new ArrayList<>(input.size());
 
         for (TimeSeries series : input) {
@@ -122,7 +121,7 @@ public class IsNonNullStage implements UnaryPipelineStage {
 
         // TODO: Extract this dense time series generation pattern into an abstract base class or utility.
         // This same pointer-based iteration pattern is used in TransformNullStage and could be shared
-        
+
         // Build dense samples in one pass using a pointer into existing samples
         List<Sample> existingSamples = series.getSamples();
         int sampleIndex = 0;
