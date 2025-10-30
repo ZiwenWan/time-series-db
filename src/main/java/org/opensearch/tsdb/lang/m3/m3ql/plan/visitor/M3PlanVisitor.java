@@ -23,6 +23,7 @@ import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.PerSecondPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.IsNonNullPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.RemoveEmptyPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.ScalePlanNode;
+import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.ScaleToSecondsPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.SortPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.SummarizePlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.TimeshiftPlanNode;
@@ -171,6 +172,15 @@ public abstract class M3PlanVisitor<T> {
      * @return the result of processing the ScalePlanNode
      */
     public T visit(ScalePlanNode planNode) {
+        return process(planNode);
+    }
+
+    /**
+     * Visit method for ScaleToSecondsPlanNode.
+     * @param planNode the ScaleToSecondsPlanNode to visit
+     * @return the result of processing the ScaleToSecondsPlanNode
+     */
+    public T visit(ScaleToSecondsPlanNode planNode) {
         return process(planNode);
     }
 

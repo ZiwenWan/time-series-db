@@ -30,6 +30,7 @@ import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.MovingPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.PerSecondPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.RemoveEmptyPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.ScalePlanNode;
+import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.ScaleToSecondsPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.SortPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.SummarizePlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.TimeshiftPlanNode;
@@ -411,6 +412,27 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
 
         IllegalStateException exception = expectThrows(IllegalStateException.class, () -> visitor.visit(planNode));
         assertEquals("ScalePlanNode must have exactly one child", exception.getMessage());
+    }
+
+    /**
+     * Test ScaleToSecondsPlanNode with correct number of children (1).
+     */
+    public void testScaleToSecondsPlanNodeWithOneChild() {
+        ScaleToSecondsPlanNode planNode = new ScaleToSecondsPlanNode(1, 10);
+        planNode.addChild(createMockFetchNode(2));
+
+        // Should not throw an exception
+        assertNotNull(visitor.visit(planNode));
+    }
+
+    /**
+     * Test ScaleToSecondsPlanNode with incorrect number of children (0).
+     */
+    public void testScaleToSecondsPlanNodeWithNoChildren() {
+        ScaleToSecondsPlanNode planNode = new ScaleToSecondsPlanNode(1, 10);
+
+        IllegalStateException exception = expectThrows(IllegalStateException.class, () -> visitor.visit(planNode));
+        assertEquals("ScaleToSecondsPlanNode must have exactly one child", exception.getMessage());
     }
 
     /**

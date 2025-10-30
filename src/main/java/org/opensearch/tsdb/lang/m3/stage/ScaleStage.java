@@ -13,13 +13,9 @@ import org.opensearch.core.xcontent.ToXContent;
 import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.tsdb.core.model.FloatSample;
 import org.opensearch.tsdb.core.model.Sample;
-import org.opensearch.tsdb.query.aggregator.TimeSeries;
 import org.opensearch.tsdb.query.stage.PipelineStageAnnotation;
-import org.opensearch.tsdb.query.stage.UnaryPipelineStage;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -27,8 +23,8 @@ import java.util.Map;
  *
  * <p>This stage multiplies all numeric values in the time series by the specified
  * scale factor, useful for unit conversions, normalizing data, or applying
- * mathematical transformations. It implements {@link UnaryPipelineStage} to
- * process a single input time series.</p>
+ * mathematical transformations. It extends {@link AbstractMapperStage} to
+ * process individual samples in each time series.</p>
  *
  * <h2>Scaling Operations:</h2>
  * <ul>
@@ -57,11 +53,11 @@ import java.util.Map;
  *
  */
 @PipelineStageAnnotation(name = "scale")
-public class ScaleStage implements UnaryPipelineStage {
+public class ScaleStage extends AbstractMapperStage {
     /** The name identifier for this pipeline stage type. */
     public static final String NAME = "scale";
 
-    private double factor = 1.0f; // Default scale factor
+    private final double factor;
 
     /**
      * Constructs a new ScaleStage with the specified scaling factor.
@@ -73,24 +69,9 @@ public class ScaleStage implements UnaryPipelineStage {
     }
 
     @Override
-    public List<TimeSeries> process(List<TimeSeries> input) {
-        if (input == null) {
-            throw new NullPointerException("Input cannot be null");
-        }
-        List<TimeSeries> result = new ArrayList<>();
-        for (TimeSeries ts : input) {
-            List<Sample> scaledSamples = new ArrayList<>();
-            for (Sample sample : ts.getSamples()) {
-                double scaledValue = sample.getValue() * factor;
-                // TODO: Benchmark and determine whether to change interface to support in-place
-                // scaling instead of creating new FloatSample objects for better performance
-                scaledSamples.add(new FloatSample(sample.getTimestamp(), scaledValue));
-            }
-            result.add(
-                new TimeSeries(scaledSamples, ts.getLabels(), ts.getMinTimestamp(), ts.getMaxTimestamp(), ts.getStep(), ts.getAlias())
-            );
-        }
-        return result;
+    protected Sample mapSample(Sample sample) {
+        double scaledValue = sample.getValue() * factor;
+        return new FloatSample(sample.getTimestamp(), scaledValue);
     }
 
     @Override
@@ -138,11 +119,6 @@ public class ScaleStage implements UnaryPipelineStage {
     public static ScaleStage fromArgs(Map<String, Object> args) {
         double factor = ((Number) args.get("factor")).doubleValue();
         return new ScaleStage(factor);
-    }
-
-    @Override
-    public boolean supportConcurrentSegmentSearch() {
-        return true;
     }
 
     @Override
