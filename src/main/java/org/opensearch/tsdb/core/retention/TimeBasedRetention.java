@@ -12,7 +12,6 @@ import org.apache.logging.log4j.Logger;
 import org.apache.lucene.store.AlreadyClosedException;
 import org.opensearch.tsdb.core.index.closed.ClosedChunkIndex;
 import org.opensearch.tsdb.core.index.closed.ClosedChunkIndexManager;
-import org.opensearch.tsdb.core.utils.Constants;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -50,10 +49,6 @@ public class TimeBasedRetention implements Retention {
      * @param interval the interval in milliseconds denoting how frequent retention cycle should run.
      */
     public TimeBasedRetention(long duration, long interval) {
-        if (duration < Constants.Time.DEFAULT_BLOCK_DURATION) {
-            throw new IllegalArgumentException("Duration must be greater than or equal to default block duration");
-        }
-
         this.duration = duration;
         this.interval = interval;
         this.lastRunTime = Instant.MIN;

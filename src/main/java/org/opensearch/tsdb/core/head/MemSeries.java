@@ -11,7 +11,6 @@ import org.opensearch.tsdb.core.chunk.ChunkAppender;
 import org.opensearch.tsdb.core.chunk.Encoding;
 import org.opensearch.tsdb.core.chunk.XORChunk;
 import org.opensearch.tsdb.core.model.Labels;
-import org.opensearch.tsdb.core.utils.Constants;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -141,7 +140,7 @@ public class MemSeries {
      * @param highWatermarkTimestamp the largest timestamp seen during ingestion so far
      * @return ClosableChunkResult contains a list of closable chunks, and the smallest seqNo of any sample still in-memory for the series
      */
-    public ClosableChunkResult getClosableChunks(long highWatermarkTimestamp) {
+    public ClosableChunkResult getClosableChunks(long highWatermarkTimestamp, long chunkExpiry) {
         lock();
         try {
             List<MemChunk> closableChunks = new ArrayList<>();
@@ -159,7 +158,7 @@ public class MemSeries {
 
             // if the head chunk hasn't been updated for a long time (based on high watermark of ingested samples), close it
             long minSeqNo = headChunk.getMinSeqNo();
-            if (highWatermarkTimestamp - headChunk.getMaxTimestamp() > Constants.Time.DEFAULT_CHUNK_EXPIRY) {
+            if (highWatermarkTimestamp - headChunk.getMaxTimestamp() > chunkExpiry) {
                 closableChunks.add(headChunk);
                 minSeqNo = Long.MAX_VALUE;
             }

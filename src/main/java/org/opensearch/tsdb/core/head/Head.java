@@ -10,7 +10,9 @@ package org.opensearch.tsdb.core.head;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.ExceptionsHelper;
 import org.opensearch.common.logging.Loggers;
+import org.opensearch.common.settings.Settings;
 import org.opensearch.core.index.shard.ShardId;
+import org.opensearch.tsdb.TSDBPlugin;
 import org.opensearch.tsdb.core.chunk.Chunk;
 import org.opensearch.tsdb.core.index.closed.ClosedChunkIndexManager;
 import org.opensearch.tsdb.core.index.live.LiveSeriesIndex;
@@ -19,7 +21,7 @@ import org.opensearch.tsdb.core.index.live.SeriesLoader;
 import org.opensearch.tsdb.core.model.FloatSample;
 import org.opensearch.tsdb.core.model.Labels;
 import org.opensearch.tsdb.core.model.Sample;
-import org.opensearch.tsdb.core.utils.Constants;
+import org.opensearch.tsdb.core.utils.Time;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -30,6 +32,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Head storage implementation for active time series data.
@@ -40,6 +43,8 @@ import java.util.Set;
  */
 public class Head {
     private static final String HEAD_DIR = "head";
+    private final HeadAppender.AppendContext appendContext;
+    private final long staleChunkExpiry;
     private final Logger log;
     private final LiveSeriesIndex liveSeriesIndex;
     private final SeriesMap seriesMap;
@@ -53,10 +58,17 @@ public class Head {
      * @param shardId                 the shard ID for this head
      * @param closedChunkIndexManager the manager for closed chunk indexes
      */
-    public Head(Path dir, ShardId shardId, ClosedChunkIndexManager closedChunkIndexManager) {
+    public Head(Path dir, ShardId shardId, ClosedChunkIndexManager closedChunkIndexManager, Settings indexSettings) {
         log = Loggers.getLogger(Head.class, shardId);
         maxTime = Long.MIN_VALUE;
         seriesMap = new SeriesMap();
+
+        TimeUnit timeUnit = TimeUnit.valueOf(TSDBPlugin.TSDB_ENGINE_TIME_UNIT.get(indexSettings));
+        long chunkRange = Time.toTimestamp(TSDBPlugin.TSDB_ENGINE_BLOCK_DURATION.get(indexSettings), timeUnit);
+        appendContext = new HeadAppender.AppendContext(
+            new ChunkOptions(chunkRange, TSDBPlugin.TSDB_ENGINE_SAMPLES_PER_CHUNK.get(indexSettings))
+        );
+        staleChunkExpiry = Time.toTimestamp(TSDBPlugin.TSDB_ENGINE_CHUNK_EXPIRY.get(indexSettings), timeUnit);
 
         Path headDir = dir.resolve(HEAD_DIR);
         try {
@@ -178,7 +190,7 @@ public class Head {
         long minSeqNo = Long.MAX_VALUE;
         Map<MemSeries, Set<MemChunk>> seriesToClosedChunks = new HashMap<>();
         for (MemSeries series : seriesList) {
-            MemSeries.ClosableChunkResult closeableChunkResult = series.getClosableChunks(maxTime);
+            MemSeries.ClosableChunkResult closeableChunkResult = series.getClosableChunks(maxTime, staleChunkExpiry);
             if (closeableChunkResult.minSeqNo() < minSeqNo) {
                 minSeqNo = closeableChunkResult.minSeqNo();
             }
@@ -247,6 +259,10 @@ public class Head {
      */
     public long getNumSeries() {
         return seriesMap.size();
+    }
+
+    private HeadAppender.AppendContext getAppendContext() {
+        return appendContext;
     }
 
     /**
@@ -318,9 +334,6 @@ public class Head {
      * Appender implementation for the head storage layer.
      */
     public static class HeadAppender implements Appender {
-        private static final AppendContext DEFAULT_APPEND_CONTEXT = new AppendContext(
-            new ChunkOptions(Constants.Time.DEFAULT_BLOCK_DURATION, Constants.DEFAULT_TARGET_SAMPLES_PER_CHUNK)
-        );
 
         private final Head head; // the head storage instance
         private MemSeries series; // the series being appended to
@@ -369,7 +382,7 @@ public class Head {
 
         @Override
         public boolean append(Runnable callback) throws InterruptedException {
-            return appendSample(DEFAULT_APPEND_CONTEXT, callback);
+            return appendSample(head.getAppendContext(), callback);
         }
 
         /**

@@ -68,7 +68,7 @@ public class TSDBPluginTests extends OpenSearchTestCase {
         List<Setting<?>> settings = plugin.getSettings();
 
         assertNotNull("Settings list should not be null", settings);
-        assertThat("Should have 3 setting", settings, hasSize(3));
+        assertThat("Should have 7 setting", settings, hasSize(7));
 
         // Verify TSDB_ENGINE_ENABLED is present
         assertTrue("Should contain TSDB_ENGINE_ENABLED setting", settings.contains(TSDBPlugin.TSDB_ENGINE_ENABLED));
@@ -78,6 +78,18 @@ public class TSDBPluginTests extends OpenSearchTestCase {
         );
 
         assertTrue("Should contain TSDB_ENGINE_RETENTION_FREQUENCY setting", settings.contains(TSDBPlugin.TSDB_ENGINE_RETENTION_FREQUENCY));
+
+        assertTrue("Should contain TSDB_ENGINE_BLOCK_DURATION setting", settings.contains(TSDBPlugin.TSDB_ENGINE_BLOCK_DURATION));
+
+        assertTrue("Should contain TSDB_ENGINE_CHUNK_EXPIRY setting", settings.contains(TSDBPlugin.TSDB_ENGINE_CHUNK_EXPIRY));
+
+        assertTrue(
+            "Should contain TSDB_ENGINE_TARGET_SAMPLES_PER_CHUNK setting",
+            settings.contains(TSDBPlugin.TSDB_ENGINE_SAMPLES_PER_CHUNK)
+        );
+
+        assertTrue("Should contain TSDB_ENGINE_TIME_UNIT setting", settings.contains(TSDBPlugin.TSDB_ENGINE_TIME_UNIT));
+
     }
 
     public void testTSDBEngineEnabledSetting() {
@@ -86,6 +98,44 @@ public class TSDBPluginTests extends OpenSearchTestCase {
         assertThat("Setting key should be correct", setting.getKey(), equalTo("index.tsdb_engine.enabled"));
         assertThat("Default value should be false", setting.getDefault(org.opensearch.common.settings.Settings.EMPTY), equalTo(false));
         assertTrue("Should be index-scoped", setting.hasIndexScope());
+    }
+
+    public void testTSDBEngineTimeUnitSettingWithValidMilliseconds() {
+        Setting<String> setting = TSDBPlugin.TSDB_ENGINE_TIME_UNIT;
+
+        Settings validSettings = Settings.builder().put("index.tsdb_engine.time_unit", "MILLISECONDS").build();
+
+        // This should not throw an exception
+        String timeUnit = setting.get(validSettings);
+        assertThat("Time unit should be MILLISECONDS", timeUnit, equalTo("MILLISECONDS"));
+    }
+
+    public void testTSDBEngineTimeUnitSettingWithInvalidTimeUnit() {
+        Setting<String> setting = TSDBPlugin.TSDB_ENGINE_TIME_UNIT;
+
+        Settings invalidSettings = Settings.builder().put("index.tsdb_engine.time_unit", "SECONDS").build();
+
+        IllegalArgumentException exception = expectThrows(IllegalArgumentException.class, () -> setting.get(invalidSettings));
+
+        assertThat(
+            "Exception message should indicate only MILLISECONDS is supported",
+            exception.getMessage(),
+            containsString("Invalid time unit: SECONDS. Only MILLISECONDS currently supported")
+        );
+    }
+
+    public void testTSDBEngineTimeUnitSettingWithInvalidString() {
+        Setting<String> setting = TSDBPlugin.TSDB_ENGINE_TIME_UNIT;
+
+        Settings invalidSettings = Settings.builder().put("index.tsdb_engine.time_unit", "INVALID_UNIT").build();
+
+        IllegalArgumentException exception = expectThrows(IllegalArgumentException.class, () -> setting.get(invalidSettings));
+
+        assertThat(
+            "Exception message should indicate invalid time unit",
+            exception.getMessage(),
+            containsString("Invalid time unit: INVALID_UNIT. Only MILLISECONDS currently supported")
+        );
     }
 
     // ========== Aggregation Tests ==========

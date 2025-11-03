@@ -40,8 +40,12 @@ public class RetentionFactory {
     public static Retention create(IndexSettings indexSettings) {
         var age = TSDBPlugin.TSDB_ENGINE_RETENTION_TIME_SETTING.get(indexSettings.getSettings());
         var frequency = TSDBPlugin.TSDB_ENGINE_RETENTION_FREQUENCY.get(indexSettings.getSettings());
+        var blockDuration = TSDBPlugin.TSDB_ENGINE_BLOCK_DURATION.get(indexSettings.getSettings());
 
         if (age != TimeValue.MINUS_ONE) {
+            if (age.compareTo(blockDuration) < 0) {
+                throw new IllegalArgumentException("Retention time/age must be greater than or equal to default block duration");
+            }
             return new TimeBasedRetention(age.getMillis(), frequency.getMillis());
         }
         return new NOOPRetention();

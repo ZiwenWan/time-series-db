@@ -121,4 +121,36 @@ public class RetentionFactoryTests extends OpenSearchTestCase {
         assertNotNull(retention2);
         assertNotSame(retention1, retention2);
     }
+
+    public void testInvalidRetentionTimeThrowsException() {
+        Settings settings = Settings.builder()
+            .put(IndexMetadata.SETTING_VERSION_CREATED, org.opensearch.Version.CURRENT)
+            .put(TSDBPlugin.TSDB_ENGINE_RETENTION_TIME_SETTING.getKey(), "5m") // Assuming block duration is greater than 5m
+            .put(TSDBPlugin.TSDB_ENGINE_BLOCK_DURATION.getKey(), "10m")
+            .build();
+
+        IndexSettings indexSettings = new IndexSettings(
+            IndexMetadata.builder("test-index").settings(settings).numberOfShards(1).numberOfReplicas(0).build(),
+            Settings.EMPTY
+        );
+
+        IllegalArgumentException exception = expectThrows(IllegalArgumentException.class, () -> RetentionFactory.create(indexSettings));
+
+        assertEquals("Retention time/age must be greater than or equal to default block duration", exception.getMessage());
+    }
+
+    public void testUnsetRetentionTime() {
+        Settings settings = Settings.builder()
+            .put(IndexMetadata.SETTING_VERSION_CREATED, org.opensearch.Version.CURRENT)
+            .put(TSDBPlugin.TSDB_ENGINE_BLOCK_DURATION.getKey(), "10m")
+            .build();
+
+        IndexSettings indexSettings = new IndexSettings(
+            IndexMetadata.builder("test-index").settings(settings).numberOfShards(1).numberOfReplicas(0).build(),
+            Settings.EMPTY
+        );
+
+        assertNotNull("No error if retention is not set", RetentionFactory.create(indexSettings));
+    }
+
 }

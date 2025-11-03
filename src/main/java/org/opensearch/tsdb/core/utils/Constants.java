@@ -7,7 +7,6 @@
  */
 package org.opensearch.tsdb.core.utils;
 
-import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -36,20 +35,5 @@ public class Constants {
          * Default time unit used for sample storage.
          */
         public static final TimeUnit DEFAULT_TIME_UNIT = TimeUnit.MILLISECONDS;
-
-        /**
-         * Non-full chunks that have not been updated after this duration will be closed.
-         */
-        public static final long DEFAULT_CHUNK_EXPIRY = Duration.ofMinutes(30).toMillis();
-
-        /**
-         * The default block duration for closed chunk indexes.
-         */
-        public static final long DEFAULT_BLOCK_DURATION = Duration.ofHours(2).toMillis();
     }
-
-    /**
-     * The default target number of samples to store in a single chunk.
-     */
-    public static final int DEFAULT_TARGET_SAMPLES_PER_CHUNK = 120;
 }

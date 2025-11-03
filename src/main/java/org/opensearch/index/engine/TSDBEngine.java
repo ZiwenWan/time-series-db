@@ -134,9 +134,15 @@ public class TSDBEngine extends Engine {
                 metadataStore,
                 retention,
                 engineConfig.getThreadPool(),
-                engineConfig.getShardId()
+                engineConfig.getShardId(),
+                engineConfig.getIndexSettings().getSettings()
             );
-            head = new Head(metricsStorePath, engineConfig.getShardId(), closedChunkIndexManager);
+            head = new Head(
+                metricsStorePath,
+                engineConfig.getShardId(),
+                closedChunkIndexManager,
+                engineConfig.getIndexSettings().getSettings()
+            );
             this.localCheckpointTracker = createLocalCheckpointTracker();
             String translogUUID = Objects.requireNonNull(lastCommittedSegmentInfos.getUserData().get(Translog.TRANSLOG_UUID_KEY));
             this.translogManager = new InternalTranslogManager(

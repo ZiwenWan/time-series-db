@@ -17,6 +17,7 @@ import org.apache.lucene.search.MatchAllDocsQuery;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.TopDocs;
 import org.opensearch.common.settings.Settings;
+import org.opensearch.common.unit.TimeValue;
 import org.opensearch.core.index.shard.ShardId;
 import org.opensearch.test.OpenSearchTestCase;
 import org.opensearch.threadpool.FixedExecutorBuilder;
@@ -52,6 +53,13 @@ import java.util.Set;
 public class ClosedChunkIndexManagerTests extends OpenSearchTestCase {
     ThreadPool threadPool;
 
+    private final Settings defaultSettings = Settings.builder()
+        .put(TSDBPlugin.TSDB_ENGINE_BLOCK_DURATION.getKey(), TimeValue.timeValueHours(2))
+        .put(TSDBPlugin.TSDB_ENGINE_CHUNK_EXPIRY.getKey(), TimeValue.timeValueMinutes(30))
+        .put(TSDBPlugin.TSDB_ENGINE_SAMPLES_PER_CHUNK.getKey(), 120)
+        .put(TSDBPlugin.TSDB_ENGINE_TIME_UNIT.getKey(), org.opensearch.tsdb.core.utils.Constants.Time.DEFAULT_TIME_UNIT.toString())
+        .build();
+
     public void setUp() throws Exception {
         super.setUp();
         threadPool = new TestThreadPool(
@@ -73,7 +81,8 @@ public class ClosedChunkIndexManagerTests extends OpenSearchTestCase {
             metadataStore,
             new NOOPRetention(),
             threadPool,
-            new ShardId("index", "uuid", 0)
+            new ShardId("index", "uuid", 0),
+            defaultSettings
         );
 
         Labels labels1 = ByteLabels.fromStrings("label1", "value1");
@@ -94,7 +103,8 @@ public class ClosedChunkIndexManagerTests extends OpenSearchTestCase {
             metadataStore,
             new NOOPRetention(),
             threadPool,
-            new ShardId("index", "uuid", 0)
+            new ShardId("index", "uuid", 0),
+            defaultSettings
         );
         assertEquals("Two indexes were created", 2, reopenedManager.getNumBlocks());
         reopenedManager.close();
@@ -108,7 +118,8 @@ public class ClosedChunkIndexManagerTests extends OpenSearchTestCase {
             metadataStore,
             new NOOPRetention(),
             threadPool,
-            new ShardId("index", "uuid", 0)
+            new ShardId("index", "uuid", 0),
+            defaultSettings
         );
 
         var blockDirs = new ArrayList<Path>();
@@ -167,7 +178,8 @@ public class ClosedChunkIndexManagerTests extends OpenSearchTestCase {
             new InMemoryMetadataStore(),
             new NOOPRetention(),
             threadPool,
-            new ShardId("index", "uuid", 0)
+            new ShardId("index", "uuid", 0),
+            defaultSettings
         );
 
         Labels labels1 = ByteLabels.fromStrings("label1", "value1");
@@ -201,7 +213,8 @@ public class ClosedChunkIndexManagerTests extends OpenSearchTestCase {
             new InMemoryMetadataStore(),
             new NOOPRetention(),
             threadPool,
-            new ShardId("index", "uuid", 0)
+            new ShardId("index", "uuid", 0),
+            defaultSettings
         );
         var blockDirs = new ArrayList<Path>();
 
@@ -249,7 +262,8 @@ public class ClosedChunkIndexManagerTests extends OpenSearchTestCase {
             new InMemoryMetadataStore(),
             new NOOPRetention(),
             threadPool,
-            new ShardId("index", "uuid", 0)
+            new ShardId("index", "uuid", 0),
+            defaultSettings
         );
 
         assertEquals("Initially no reader managers", 0, manager.getReaderManagers().size());
@@ -278,7 +292,8 @@ public class ClosedChunkIndexManagerTests extends OpenSearchTestCase {
             new InMemoryMetadataStore(),
             new NOOPRetention(),
             threadPool,
-            new ShardId("index", "uuid", 0)
+            new ShardId("index", "uuid", 0),
+            defaultSettings
         );
 
         ClosedChunkIndexManager.SnapshotResult emptyResult = manager.snapshotAllIndexes();
@@ -351,7 +366,8 @@ public class ClosedChunkIndexManagerTests extends OpenSearchTestCase {
             new InMemoryMetadataStore(),
             new NOOPRetention(),
             threadPool,
-            new ShardId("index", "uuid", 0)
+            new ShardId("index", "uuid", 0),
+            defaultSettings
         );
 
         Labels labels1 = ByteLabels.fromStrings("label1", "value1");
@@ -378,9 +394,10 @@ public class ClosedChunkIndexManagerTests extends OpenSearchTestCase {
         ClosedChunkIndexManager manager = new ClosedChunkIndexManager(
             tempDir,
             metadataStore,
-            new TimeBasedRetention(org.opensearch.tsdb.core.utils.Constants.Time.DEFAULT_BLOCK_DURATION, 300_000),
+            new TimeBasedRetention(TSDBPlugin.TSDB_ENGINE_BLOCK_DURATION.get(defaultSettings).getMillis(), 300_000),
             threadPool,
-            new ShardId("index", "uuid", 0)
+            new ShardId("index", "uuid", 0),
+            defaultSettings
         );
 
         var blockDirs = new ArrayList<Path>();

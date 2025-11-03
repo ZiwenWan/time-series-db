@@ -7,16 +7,18 @@
  */
 package org.opensearch.tsdb.core.head;
 
+import org.opensearch.common.unit.TimeValue;
 import org.opensearch.test.OpenSearchTestCase;
 import org.opensearch.tsdb.core.model.ByteLabels;
 import org.opensearch.tsdb.core.model.Labels;
-import org.opensearch.tsdb.core.utils.Constants;
 
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class MemSeriesTests extends OpenSearchTestCase {
+
+    private static final long TEST_CHUNK_EXPIRY = TimeValue.timeValueMinutes(30).getMillis();
 
     public void testAppend() {
         Labels labels = ByteLabels.fromStrings("k1", "v1", "k2", "v2");
@@ -60,7 +62,7 @@ public class MemSeriesTests extends OpenSearchTestCase {
 
     public void testGetClosableChunksHeadExpiration() {
         MemSeries series = new MemSeries(123L, ByteLabels.fromStrings("k1", "v1", "k2", "v2"));
-        MemSeries.ClosableChunkResult result = series.getClosableChunks(2000L);
+        MemSeries.ClosableChunkResult result = series.getClosableChunks(2000L, TEST_CHUNK_EXPIRY);
         assertTrue(result.closableChunks().isEmpty());
         assertEquals(Long.MAX_VALUE, result.minSeqNo());
 
@@ -70,12 +72,12 @@ public class MemSeriesTests extends OpenSearchTestCase {
         series.append(11, 2000L, 20.0, options);
 
         // cannot close the head chunk if it's modified recently
-        result = series.getClosableChunks(2000L);
+        result = series.getClosableChunks(2000L, TEST_CHUNK_EXPIRY);
         assertTrue(result.closableChunks().isEmpty());
         assertEquals(10, result.minSeqNo());
 
         // can close the head chunk if its hasn't been modified for a long time
-        result = series.getClosableChunks(2000L + Constants.Time.DEFAULT_CHUNK_EXPIRY + 1);
+        result = series.getClosableChunks(2000L + TEST_CHUNK_EXPIRY + 1, TEST_CHUNK_EXPIRY);
         assertEquals(1, result.closableChunks().size());
         assertEquals(Long.MAX_VALUE, result.minSeqNo());
     }
@@ -84,7 +86,7 @@ public class MemSeriesTests extends OpenSearchTestCase {
         MemSeries series = createMemSeries(3); // creates 3 chunks with 8 samples each
         assertEquals("3 chunks created", 3, series.getHeadChunk().len());
 
-        MemSeries.ClosableChunkResult result = series.getClosableChunks(25000L);
+        MemSeries.ClosableChunkResult result = series.getClosableChunks(25000L, TEST_CHUNK_EXPIRY);
         assertEquals(2, result.closableChunks().size());
         assertEquals(16, result.minSeqNo());
         assertFalse("head chunk is not closable", result.closableChunks().contains(series.getHeadChunk()));
@@ -102,7 +104,7 @@ public class MemSeriesTests extends OpenSearchTestCase {
             series.append(i, timestamp, value, options);
         }
 
-        var result = series.getClosableChunks(10000L);
+        var result = series.getClosableChunks(10000L, TEST_CHUNK_EXPIRY);
         assertEquals(1, result.closableChunks().size());
         assertEquals(1, result.minSeqNo());
     }

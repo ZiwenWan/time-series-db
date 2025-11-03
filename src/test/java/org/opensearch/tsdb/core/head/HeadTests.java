@@ -18,6 +18,7 @@ import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.util.BytesRef;
 import org.opensearch.common.settings.Settings;
+import org.opensearch.common.unit.TimeValue;
 import org.opensearch.core.index.shard.ShardId;
 import org.opensearch.test.OpenSearchTestCase;
 import org.opensearch.threadpool.FixedExecutorBuilder;
@@ -46,6 +47,15 @@ import java.util.concurrent.CountDownLatch;
 public class HeadTests extends OpenSearchTestCase {
     ThreadPool threadPool;
 
+    private static final TimeValue TEST_CHUNK_EXPIRY = TimeValue.timeValueMinutes(30);
+
+    private final Settings defaultSettings = Settings.builder()
+        .put(TSDBPlugin.TSDB_ENGINE_BLOCK_DURATION.getKey(), TimeValue.timeValueHours(2))
+        .put(TSDBPlugin.TSDB_ENGINE_CHUNK_EXPIRY.getKey(), TEST_CHUNK_EXPIRY)
+        .put(TSDBPlugin.TSDB_ENGINE_SAMPLES_PER_CHUNK.getKey(), 120)
+        .put(TSDBPlugin.TSDB_ENGINE_TIME_UNIT.getKey(), Constants.Time.DEFAULT_TIME_UNIT.toString())
+        .build();
+
     public void setUp() throws Exception {
         super.setUp();
         threadPool = new TestThreadPool(
@@ -65,10 +75,16 @@ public class HeadTests extends OpenSearchTestCase {
             new InMemoryMetadataStore(),
             new NOOPRetention(),
             threadPool,
-            new ShardId("headTest", "headTestUid", 0)
+            new ShardId("headTest", "headTestUid", 0),
+            defaultSettings
         );
 
-        Head head = new Head(createTempDir("testHeadLifecycle"), new ShardId("headTest", "headTestUid", 0), closedChunkIndexManager);
+        Head head = new Head(
+            createTempDir("testHeadLifecycle"),
+            new ShardId("headTest", "headTestUid", 0),
+            closedChunkIndexManager,
+            defaultSettings
+        );
         Head.HeadAppender.AppendContext context = new Head.HeadAppender.AppendContext(new ChunkOptions(1000, 10));
         Labels seriesLabels = ByteLabels.fromStrings("k1", "v1", "k2", "v2");
 
@@ -143,9 +159,10 @@ public class HeadTests extends OpenSearchTestCase {
             new InMemoryMetadataStore(),
             new NOOPRetention(),
             threadPool,
-            shardId
+            shardId,
+            defaultSettings
         );
-        Head head = new Head(metricsPath, shardId, closedChunkIndexManager);
+        Head head = new Head(metricsPath, shardId, closedChunkIndexManager, defaultSettings);
 
         Head.HeadAppender.AppendContext context = new Head.HeadAppender.AppendContext(new ChunkOptions(1000, 10));
         Labels seriesNoData = ByteLabels.fromStrings("k1", "v1", "k2", "v2");
@@ -172,7 +189,7 @@ public class HeadTests extends OpenSearchTestCase {
         assertEquals("getNumSeries returns 1", 1, head.getNumSeries());
 
         // Simulate advancing the time, so the series with data may have it's last chunk closed
-        head.updateMaxSeenTimestamp(Constants.Time.DEFAULT_CHUNK_EXPIRY + 1000L);
+        head.updateMaxSeenTimestamp(TEST_CHUNK_EXPIRY.getMillis() + 1000L);
         head.closeHeadChunks();
         assertNull("Series with last append at seqNo 9 is removed", head.getSeriesMap().getByReference(seriesWithData.stableHash()));
         assertTrue("No series remain in LiveSeriesIndex", getChunks(head, closedChunkIndexManager).isEmpty());
@@ -192,11 +209,12 @@ public class HeadTests extends OpenSearchTestCase {
             metadataStore,
             new NOOPRetention(),
             threadPool,
-            shardId
+            shardId,
+            defaultSettings
         );
         Path headPath = createTempDir("testHeadRecovery");
 
-        Head head = new Head(headPath, new ShardId("headTest", "headTestUid", 0), closedChunkIndexManager);
+        Head head = new Head(headPath, new ShardId("headTest", "headTestUid", 0), closedChunkIndexManager, defaultSettings);
         Head.HeadAppender.AppendContext context = new Head.HeadAppender.AppendContext(new ChunkOptions(1001, 10));
         Labels series1 = ByteLabels.fromStrings("k1", "v1", "k2", "v2");
         Labels series2 = ByteLabels.fromStrings("k1", "v1", "k3", "v3");
@@ -224,9 +242,10 @@ public class HeadTests extends OpenSearchTestCase {
             metadataStore,
             new NOOPRetention(),
             threadPool,
-            shardId
+            shardId,
+            defaultSettings
         );
-        Head newHead = new Head(headPath, new ShardId("headTest", "headTestUid", 0), newClosedChunkIndexManager);
+        Head newHead = new Head(headPath, new ShardId("headTest", "headTestUid", 0), newClosedChunkIndexManager, defaultSettings);
 
         // MemSeries are correctly loaded and updated from commit data
         assertEquals(series1, newHead.getSeriesMap().getByReference(series1Reference).getLabels());
@@ -273,9 +292,10 @@ public class HeadTests extends OpenSearchTestCase {
             new InMemoryMetadataStore(),
             new NOOPRetention(),
             threadPool,
-            shardId
+            shardId,
+            defaultSettings
         );
-        Head head = new Head(metricsPath, shardId, closedChunkIndexManager);
+        Head head = new Head(metricsPath, shardId, closedChunkIndexManager, defaultSettings);
         Labels labels = ByteLabels.fromStrings("k1", "v1", "k2", "v2");
 
         // Test creating a new series with specified hash
@@ -303,9 +323,10 @@ public class HeadTests extends OpenSearchTestCase {
             new InMemoryMetadataStore(),
             new NOOPRetention(),
             threadPool,
-            shardId
+            shardId,
+            defaultSettings
         );
-        Head head = new Head(metricsPath, shardId, closedChunkIndexManager);
+        Head head = new Head(metricsPath, shardId, closedChunkIndexManager, defaultSettings);
         Labels labels = ByteLabels.fromStrings("k1", "v1", "k2", "v2");
 
         // Test creating a new series with specified hash
@@ -333,9 +354,10 @@ public class HeadTests extends OpenSearchTestCase {
             new InMemoryMetadataStore(),
             new NOOPRetention(),
             threadPool,
-            shardId
+            shardId,
+            defaultSettings
         );
-        Head head = new Head(metricsPath, shardId, closedChunkIndexManager);
+        Head head = new Head(metricsPath, shardId, closedChunkIndexManager, defaultSettings);
         long hash = 123L;
 
         // these values for # threads and iterations were chosen to reliably cause contention, based on code coverage inspection
@@ -498,9 +520,10 @@ public class HeadTests extends OpenSearchTestCase {
             new InMemoryMetadataStore(),
             new NOOPRetention(),
             threadPool,
-            shardId
+            shardId,
+            defaultSettings
         );
-        Head head = new Head(metricsPath, shardId, closedChunkIndexManager);
+        Head head = new Head(metricsPath, shardId, closedChunkIndexManager, defaultSettings);
 
         // Test that newAppender returns non-null
         Head.HeadAppender appender1 = head.newAppender();
@@ -523,9 +546,10 @@ public class HeadTests extends OpenSearchTestCase {
             new InMemoryMetadataStore(),
             new NOOPRetention(),
             threadPool,
-            shardId
+            shardId,
+            defaultSettings
         );
-        Head head = new Head(metricsPath, shardId, closedChunkIndexManager);
+        Head head = new Head(metricsPath, shardId, closedChunkIndexManager, defaultSettings);
 
         // Use high thread count and iterations to reliably induce contention
         int numThreads = 50;

@@ -12,6 +12,7 @@ import org.apache.lucene.index.IndexCommit;
 import org.apache.lucene.index.ReaderManager;
 import org.opensearch.common.UUIDs;
 import org.opensearch.common.logging.Loggers;
+import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.common.xcontent.XContentFactory;
 import org.opensearch.core.index.shard.ShardId;
@@ -44,6 +45,7 @@ import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
@@ -81,6 +83,9 @@ public class ClosedChunkIndexManager {
     private final Retention retention;
     private final Scheduler.Cancellable mgmtTaskScheduler;
 
+    // Duration of each block
+    private final long blockDuration;
+
     /**
      * Constructor for ClosedChunkIndexManager
      *
@@ -89,7 +94,14 @@ public class ClosedChunkIndexManager {
      * @param threadPool    to run async management tasks e.g. retention, compaction
      * @param shardId       ShardId for logging context
      */
-    public ClosedChunkIndexManager(Path dir, MetadataStore metadataStore, Retention retention, ThreadPool threadPool, ShardId shardId) {
+    public ClosedChunkIndexManager(
+        Path dir,
+        MetadataStore metadataStore,
+        Retention retention,
+        ThreadPool threadPool,
+        ShardId shardId,
+        Settings settings
+    ) {
         this.dir = dir.resolve(BLOCKS_DIR);
         try {
             Files.createDirectories(this.dir);
@@ -107,6 +119,11 @@ public class ClosedChunkIndexManager {
             this::runOptimization,
             TimeValue.timeValueMillis(Duration.ofMillis(retention.getFrequency()).toMillis()),
             TSDBPlugin.MGMT_THREAD_POOL_NAME
+        );
+
+        blockDuration = Time.toTimestamp(
+            TSDBPlugin.TSDB_ENGINE_BLOCK_DURATION.get(settings),
+            TimeUnit.valueOf(TSDBPlugin.TSDB_ENGINE_TIME_UNIT.get(settings))
         );
     }
 
@@ -248,8 +265,8 @@ public class ClosedChunkIndexManager {
     }
 
     private ClosedChunkIndex createNewIndex(long chunkTimestamp) throws IOException {
-        long newIndexMaxTime = rangeForTimestamp(chunkTimestamp, Constants.Time.DEFAULT_BLOCK_DURATION);
-        long newIndexMinTime = newIndexMaxTime - Constants.Time.DEFAULT_BLOCK_DURATION;
+        long newIndexMaxTime = rangeForTimestamp(chunkTimestamp, blockDuration);
+        long newIndexMinTime = newIndexMaxTime - blockDuration;
         String dirName = String.join("_", BLOCK_PREFIX, Long.toString(newIndexMinTime), Long.toString(newIndexMaxTime), UUIDs.base64UUID());
         ClosedChunkIndex.Metadata metadata = new ClosedChunkIndex.Metadata(dirName, newIndexMinTime, newIndexMaxTime);
         ClosedChunkIndex newIndex;

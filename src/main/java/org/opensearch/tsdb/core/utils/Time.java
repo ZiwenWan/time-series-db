@@ -7,6 +7,8 @@
  */
 package org.opensearch.tsdb.core.utils;
 
+import org.opensearch.common.unit.TimeValue;
+
 import java.time.Instant;
 import java.util.concurrent.TimeUnit;
 
@@ -74,6 +76,19 @@ public class Time {
         return switch (timeUnit) {
             case TimeUnit.MILLISECONDS -> time.toEpochMilli();
             case TimeUnit.NANOSECONDS -> (time.getEpochSecond() * 1_000_000_000L) + time.getNano();
+            default -> throw new UnsupportedOperationException("Unsupported time unit:" + timeUnit);
+        };
+    }
+
+    /**
+     * Converts a {@link TimeValue} to a numeric timestamp in the specified time unit.
+     * @param timeValue time value to convert
+     * @param timeUnit the target time unit for the timestamp ({@link TimeUnit#MILLISECONDS}
+     * @return the numeric timestamp in the specified time unit since the Unix epoch
+     */
+    public static long toTimestamp(TimeValue timeValue, TimeUnit timeUnit) {
+        return switch (timeUnit) {
+            case TimeUnit.MILLISECONDS -> timeValue.millis();
             default -> throw new UnsupportedOperationException("Unsupported time unit:" + timeUnit);
         };
     }

@@ -7,10 +7,10 @@
  */
 package org.opensearch.tsdb.core.retention;
 
+import org.opensearch.common.unit.TimeValue;
 import org.opensearch.test.OpenSearchTestCase;
 import org.opensearch.tsdb.core.index.closed.ClosedChunkIndex;
 import org.opensearch.tsdb.core.index.closed.ClosedChunkIndexManager;
-import org.opensearch.tsdb.core.utils.Constants;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -31,6 +31,8 @@ import static org.mockito.Mockito.when;
 
 public class TimeBasedRetentionTests extends OpenSearchTestCase {
 
+    private static final long TEST_BLOCK_DURATION = TimeValue.timeValueHours(2).getMillis();
+
     private ClosedChunkIndexManager closedChunkIndexManager;
     private Path metricsDirectory;
     private TimeBasedRetention retention;
@@ -40,7 +42,7 @@ public class TimeBasedRetentionTests extends OpenSearchTestCase {
         super.setUp();
         closedChunkIndexManager = mock(ClosedChunkIndexManager.class);
         metricsDirectory = createTempDir();
-        retention = new TimeBasedRetention(Constants.Time.DEFAULT_BLOCK_DURATION, 0);
+        retention = new TimeBasedRetention(TEST_BLOCK_DURATION, 0);
     }
 
     public void testDropWithEmptyResults() {
@@ -49,19 +51,9 @@ public class TimeBasedRetentionTests extends OpenSearchTestCase {
         assertTrue(result.success().isEmpty());
     }
 
-    public void testConstructorWithInvalidDuration() {
-        try {
-            retention = new TimeBasedRetention(0, 0);
-        } catch (IllegalArgumentException e) {
-            return;
-        }
-
-        fail("IllegalArgumentException should have been thrown");
-    }
-
     public void testRunInterval() {
         var ccm = mock(ClosedChunkIndexManager.class);
-        var retention = new TimeBasedRetention(Constants.Time.DEFAULT_BLOCK_DURATION, Duration.ofMinutes(10).toMillis());
+        var retention = new TimeBasedRetention(TEST_BLOCK_DURATION, Duration.ofMinutes(10).toMillis());
 
         // First call should set the last run time.
         var result = retention.run(ccm);
@@ -81,11 +73,11 @@ public class TimeBasedRetentionTests extends OpenSearchTestCase {
         Path oldIndexPath = metricsDirectory.resolve("block_old");
         Path recentIndexPath = metricsDirectory.resolve("block_recent");
 
-        ClosedChunkIndex.Metadata oldMetadata = new ClosedChunkIndex.Metadata("block_old", 0L, Constants.Time.DEFAULT_BLOCK_DURATION);
+        ClosedChunkIndex.Metadata oldMetadata = new ClosedChunkIndex.Metadata("block_old", 0L, TEST_BLOCK_DURATION);
         ClosedChunkIndex.Metadata recentMetadata = new ClosedChunkIndex.Metadata(
             "block_recent",
-            Constants.Time.DEFAULT_BLOCK_DURATION * 2,
-            Constants.Time.DEFAULT_BLOCK_DURATION * 3
+            TEST_BLOCK_DURATION * 2,
+            TEST_BLOCK_DURATION * 3
         );
 
         ClosedChunkIndex oldIndex = new ClosedChunkIndex(oldIndexPath, oldMetadata);
@@ -124,22 +116,10 @@ public class TimeBasedRetentionTests extends OpenSearchTestCase {
         Path indexPath4 = metricsDirectory.resolve("block_400");
 
         // With TTL=DEFAULT_BLOCK_DURATION , first 3 should be removed
-        ClosedChunkIndex.Metadata metadata1 = new ClosedChunkIndex.Metadata("block_100", 0L, Constants.Time.DEFAULT_BLOCK_DURATION);
-        ClosedChunkIndex.Metadata metadata2 = new ClosedChunkIndex.Metadata(
-            "block_200",
-            Constants.Time.DEFAULT_BLOCK_DURATION,
-            Constants.Time.DEFAULT_BLOCK_DURATION * 2
-        );
-        ClosedChunkIndex.Metadata metadata3 = new ClosedChunkIndex.Metadata(
-            "block_300",
-            Constants.Time.DEFAULT_BLOCK_DURATION * 2,
-            Constants.Time.DEFAULT_BLOCK_DURATION * 3
-        );
-        ClosedChunkIndex.Metadata metadata4 = new ClosedChunkIndex.Metadata(
-            "block_400",
-            Constants.Time.DEFAULT_BLOCK_DURATION * 4,
-            Constants.Time.DEFAULT_BLOCK_DURATION * 5
-        );
+        ClosedChunkIndex.Metadata metadata1 = new ClosedChunkIndex.Metadata("block_100", 0L, TEST_BLOCK_DURATION);
+        ClosedChunkIndex.Metadata metadata2 = new ClosedChunkIndex.Metadata("block_200", TEST_BLOCK_DURATION, TEST_BLOCK_DURATION * 2);
+        ClosedChunkIndex.Metadata metadata3 = new ClosedChunkIndex.Metadata("block_300", TEST_BLOCK_DURATION * 2, TEST_BLOCK_DURATION * 3);
+        ClosedChunkIndex.Metadata metadata4 = new ClosedChunkIndex.Metadata("block_400", TEST_BLOCK_DURATION * 4, TEST_BLOCK_DURATION * 5);
 
         ClosedChunkIndex realIndex1 = new ClosedChunkIndex(indexPath1, metadata1);
         ClosedChunkIndex realIndex2 = new ClosedChunkIndex(indexPath2, metadata2);
@@ -172,17 +152,9 @@ public class TimeBasedRetentionTests extends OpenSearchTestCase {
 
         // Old indexes: 0-1000ms, 1000-2000ms, Recent: 3000-4000ms
         // With TTL=1000ms, first 2 should be attempted for removal (4000-2000 = 2000 >= 1000)
-        ClosedChunkIndex.Metadata metadata1 = new ClosedChunkIndex.Metadata("block_100", 0L, Constants.Time.DEFAULT_BLOCK_DURATION);
-        ClosedChunkIndex.Metadata metadata2 = new ClosedChunkIndex.Metadata(
-            "block_200",
-            Constants.Time.DEFAULT_BLOCK_DURATION,
-            Constants.Time.DEFAULT_BLOCK_DURATION * 2
-        );
-        ClosedChunkIndex.Metadata metadata3 = new ClosedChunkIndex.Metadata(
-            "block_300",
-            Constants.Time.DEFAULT_BLOCK_DURATION * 2,
-            Constants.Time.DEFAULT_BLOCK_DURATION * 3
-        );
+        ClosedChunkIndex.Metadata metadata1 = new ClosedChunkIndex.Metadata("block_100", 0L, TEST_BLOCK_DURATION);
+        ClosedChunkIndex.Metadata metadata2 = new ClosedChunkIndex.Metadata("block_200", TEST_BLOCK_DURATION, TEST_BLOCK_DURATION * 2);
+        ClosedChunkIndex.Metadata metadata3 = new ClosedChunkIndex.Metadata("block_300", TEST_BLOCK_DURATION * 2, TEST_BLOCK_DURATION * 3);
 
         ClosedChunkIndex realIndex1 = new ClosedChunkIndex(indexPath1, metadata1);
         ClosedChunkIndex realIndex2 = new ClosedChunkIndex(indexPath2, metadata2);

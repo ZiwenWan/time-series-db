@@ -17,6 +17,7 @@ import org.opensearch.common.settings.Settings;
 import org.opensearch.common.settings.SettingsFilter;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.core.common.io.stream.NamedWriteableRegistry;
+import org.opensearch.tsdb.core.utils.Constants;
 import org.opensearch.core.index.shard.ShardId;
 import org.opensearch.env.ShardLock;
 import org.opensearch.index.IndexSettings;
@@ -45,6 +46,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 /**
@@ -94,13 +96,78 @@ public class TSDBPlugin extends Plugin implements SearchPlugin, EnginePlugin, Ac
     );
 
     /**
+     * Setting for the target number of samples to store in a single chunk.
+     *
+     * TODO: consume this setting in the TSDB engine implementation to allow changes to be picked up quickly.
+     */
+    public static final Setting<Integer> TSDB_ENGINE_SAMPLES_PER_CHUNK = Setting.intSetting(
+        "index.tsdb_engine.chunk.samples_per_chunk",
+        120,
+        4,
+        Setting.Property.IndexScope,
+        Setting.Property.Dynamic
+    );
+
+    /**
+     * Setting for the chunk expiry duration. Non-full chunks will be closed after this grace period if no new samples come in. May be
+     * used to prevent sparse samples from each creating their own chunk.
+     *
+     * TODO: consume this setting in the TSDB engine implementation to allow changes to be picked up quickly.
+     */
+    public static final Setting<TimeValue> TSDB_ENGINE_CHUNK_EXPIRY = Setting.positiveTimeSetting(
+        "index.tsdb_engine.chunk.expiry",
+        TimeValue.timeValueMinutes(30),
+        Setting.Property.IndexScope,
+        Setting.Property.Dynamic
+    );
+
+    /**
+     * Setting for the block duration for closed chunk indexes.
+     */
+    public static final Setting<TimeValue> TSDB_ENGINE_BLOCK_DURATION = Setting.positiveTimeSetting(
+        "index.tsdb_engine.block.duration",
+        TimeValue.timeValueHours(2),
+        Setting.Property.IndexScope,
+        Setting.Property.Final
+    );
+
+    /**
+     * Setting for the default time unit used for sample storage.
+     */
+    public static final Setting<String> TSDB_ENGINE_TIME_UNIT = Setting.simpleString(
+        "index.tsdb_engine.time_unit",
+        Constants.Time.DEFAULT_TIME_UNIT.toString(),
+        value -> {
+            try {
+                TimeUnit unit = TimeUnit.valueOf(value);
+                if (unit != TimeUnit.MILLISECONDS) {
+                    throw new IllegalArgumentException(); // TODO: support additional time units when properly handled
+
+                }
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException("Invalid time unit: " + value + ". Only MILLISECONDS currently supported");
+            }
+        },
+        Setting.Property.IndexScope,
+        Setting.Property.Final
+    );
+
+    /**
      * Default constructor
      */
     public TSDBPlugin() {}
 
     @Override
     public List<Setting<?>> getSettings() {
-        return List.of(TSDB_ENGINE_ENABLED, TSDB_ENGINE_RETENTION_TIME_SETTING, TSDB_ENGINE_RETENTION_FREQUENCY);
+        return List.of(
+            TSDB_ENGINE_ENABLED,
+            TSDB_ENGINE_RETENTION_TIME_SETTING,
+            TSDB_ENGINE_RETENTION_FREQUENCY,
+            TSDB_ENGINE_SAMPLES_PER_CHUNK,
+            TSDB_ENGINE_CHUNK_EXPIRY,
+            TSDB_ENGINE_BLOCK_DURATION,
+            TSDB_ENGINE_TIME_UNIT
+        );
     }
 
     @Override
