@@ -17,6 +17,7 @@ import org.opensearch.search.aggregations.AggregationBuilder;
 import org.opensearch.search.aggregations.AggregatorFactories.Builder;
 import org.opensearch.search.aggregations.AggregatorFactory;
 import org.opensearch.search.aggregations.support.ValuesSourceRegistry;
+import org.opensearch.tsdb.TSDBPlugin;
 import org.opensearch.tsdb.query.stage.PipelineStage;
 import org.opensearch.tsdb.query.stage.PipelineStageFactory;
 import org.opensearch.tsdb.query.stage.UnaryPipelineStage;
@@ -275,6 +276,10 @@ public class TimeSeriesUnfoldAggregationBuilder extends AbstractAggregationBuild
     @Override
     protected AggregatorFactory doBuild(QueryShardContext queryShardContext, AggregatorFactory parent, Builder subFactoriesBuilder)
         throws IOException {
+        boolean tsdbEnabled = TSDBPlugin.TSDB_ENGINE_ENABLED.get(queryShardContext.getIndexSettings().getSettings());
+        if (!tsdbEnabled) {
+            throw new IllegalStateException("Time Series Unfold Aggregator can only be used on indices where tsdb_engine.enabled is true");
+        }
         return new TimeSeriesUnfoldAggregatorFactory(
             name,
             queryShardContext,

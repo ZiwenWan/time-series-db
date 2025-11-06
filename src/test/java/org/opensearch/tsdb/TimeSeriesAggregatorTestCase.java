@@ -16,11 +16,14 @@ import org.apache.lucene.search.Query;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.tests.index.RandomIndexWriter;
 import org.opensearch.common.CheckedConsumer;
+import org.opensearch.common.settings.Settings;
+import org.opensearch.index.IndexSettings;
 import org.opensearch.index.mapper.MappedFieldType;
 import org.opensearch.plugins.SearchPlugin;
 import org.opensearch.search.aggregations.AggregationBuilder;
 import org.opensearch.search.aggregations.AggregatorTestCase;
 import org.opensearch.search.aggregations.InternalAggregation;
+import org.opensearch.test.IndexSettingsModule;
 import org.opensearch.tsdb.core.index.closed.ClosedChunkIndex;
 import org.opensearch.tsdb.core.index.closed.ClosedChunkIndexLeafReader;
 import org.opensearch.tsdb.core.utils.Constants;
@@ -43,6 +46,22 @@ public abstract class TimeSeriesAggregatorTestCase extends AggregatorTestCase {
     @Override
     protected List<SearchPlugin> getSearchPlugins() {
         return List.of(new TSDBPlugin());
+    }
+
+    /**
+     * Override to provide IndexSettings with tsdb_engine enabled for all TSDB aggregator tests.
+     * This ensures that TimeSeriesUnfoldAggregationBuilder can be used in tests.
+     */
+    @Override
+    protected IndexSettings createIndexSettings() {
+        return IndexSettingsModule.newIndexSettings(
+            "test_index",
+            Settings.builder()
+                .put("index.tsdb_engine.enabled", true)
+                .put("index.queries.cache.enabled", false)
+                .put("index.requests.cache.enable", false)
+                .build()
+        );
     }
 
     /**

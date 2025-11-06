@@ -37,6 +37,11 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+import org.opensearch.common.settings.Settings;
+import org.opensearch.index.IndexSettings;
+import org.opensearch.test.IndexSettingsModule;
 
 /**
  * Unit tests for TimeSeriesUnfoldAggregationBuilder.
@@ -228,8 +233,8 @@ public class TimeSeriesUnfoldAggregationBuilderTests extends BaseAggregationTest
         List<UnaryPipelineStage> stages = List.of(new ScaleStage(2.0));
         TimeSeriesUnfoldAggregationBuilder builder = new TimeSeriesUnfoldAggregationBuilder("test_build", stages, 1000L, 2000L, 100L);
 
-        // Mock dependencies
-        QueryShardContext mockContext = mock(QueryShardContext.class);
+        // Mock dependencies with tsdb_engine enabled
+        QueryShardContext mockContext = mockQueryShardContextWithTsdbEngine(true);
         AggregatorFactory mockParent = mock(AggregatorFactory.class);
         AggregatorFactories.Builder mockSubFactoriesBuilder = mock(AggregatorFactories.Builder.class);
 
@@ -239,6 +244,62 @@ public class TimeSeriesUnfoldAggregationBuilderTests extends BaseAggregationTest
         // Assert
         assertNotNull(factory);
         assertTrue(factory instanceof TimeSeriesUnfoldAggregatorFactory);
+    }
+
+    /**
+     * Test doBuild method throws IllegalStateException when tsdb_engine is disabled.
+     */
+    public void testDoBuildFailsWhenTsdbEngineDisabled() throws Exception {
+        // Arrange
+        List<UnaryPipelineStage> stages = List.of(new ScaleStage(2.0));
+        TimeSeriesUnfoldAggregationBuilder builder = new TimeSeriesUnfoldAggregationBuilder("test_build_fail", stages, 1000L, 2000L, 100L);
+
+        // Mock dependencies with tsdb_engine disabled
+        QueryShardContext mockContext = mockQueryShardContextWithTsdbEngine(false);
+        AggregatorFactory mockParent = mock(AggregatorFactory.class);
+        AggregatorFactories.Builder mockSubFactoriesBuilder = mock(AggregatorFactories.Builder.class);
+
+        // Act & Assert
+        IllegalStateException exception = expectThrows(
+            IllegalStateException.class,
+            () -> builder.doBuild(mockContext, mockParent, mockSubFactoriesBuilder)
+        );
+
+        assertTrue(
+            "Exception message should mention tsdb_engine requirement",
+            exception.getMessage().contains("tsdb_engine.enabled is true")
+        );
+    }
+
+    /**
+     * Test doBuild method throws IllegalStateException when tsdb_engine setting is missing (defaults to false).
+     */
+    public void testDoBuildFailsWhenTsdbEngineSettingMissing() throws Exception {
+        // Arrange
+        List<UnaryPipelineStage> stages = List.of(new ScaleStage(2.0));
+        TimeSeriesUnfoldAggregationBuilder builder = new TimeSeriesUnfoldAggregationBuilder(
+            "test_build_missing",
+            stages,
+            1000L,
+            2000L,
+            100L
+        );
+
+        // Mock dependencies with no tsdb_engine setting (defaults to false)
+        QueryShardContext mockContext = mockQueryShardContextWithTsdbEngine(null);
+        AggregatorFactory mockParent = mock(AggregatorFactory.class);
+        AggregatorFactories.Builder mockSubFactoriesBuilder = mock(AggregatorFactories.Builder.class);
+
+        // Act & Assert
+        IllegalStateException exception = expectThrows(
+            IllegalStateException.class,
+            () -> builder.doBuild(mockContext, mockParent, mockSubFactoriesBuilder)
+        );
+
+        assertTrue(
+            "Exception message should mention tsdb_engine requirement",
+            exception.getMessage().contains("tsdb_engine.enabled is true")
+        );
     }
 
     /**
@@ -651,5 +712,29 @@ public class TimeSeriesUnfoldAggregationBuilderTests extends BaseAggregationTest
             ScaleStage thirdScale = (ScaleStage) result.getStages().get(2);
             assertEquals(0.5, thirdScale.getFactor(), 0.001);
         }
+    }
+
+    /**
+     * Helper method to create a mock QueryShardContext with specific tsdb_engine setting.
+     *
+     * @param tsdbEngineEnabled true to enable tsdb_engine, false to disable, null for missing setting
+     * @return Mocked QueryShardContext
+     */
+    private QueryShardContext mockQueryShardContextWithTsdbEngine(Boolean tsdbEngineEnabled) {
+        QueryShardContext mockContext = mock(QueryShardContext.class);
+
+        // Create real IndexSettings object since it's final and can't be mocked
+        Settings.Builder settingsBuilder = Settings.builder();
+        if (tsdbEngineEnabled != null) {
+            settingsBuilder.put("index.tsdb_engine.enabled", tsdbEngineEnabled);
+        }
+        Settings settings = settingsBuilder.build();
+
+        // Create a real IndexSettings instance using IndexSettingsModule
+        IndexSettings indexSettings = IndexSettingsModule.newIndexSettings("test_index", settings);
+
+        when(mockContext.getIndexSettings()).thenReturn(indexSettings);
+
+        return mockContext;
     }
 }
