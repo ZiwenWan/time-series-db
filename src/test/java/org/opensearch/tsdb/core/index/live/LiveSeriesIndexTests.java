@@ -23,6 +23,7 @@ import org.apache.lucene.search.Query;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.store.AlreadyClosedException;
+import org.opensearch.index.engine.TSDBTragicException;
 import org.opensearch.test.OpenSearchTestCase;
 import org.opensearch.tsdb.core.head.MemSeries;
 import org.opensearch.tsdb.core.mapping.Constants;
@@ -271,7 +272,7 @@ public class LiveSeriesIndexTests extends OpenSearchTestCase {
         // Close the index first to make addSeries throw IOException
         liveSeriesIndex.close();
 
-        expectThrows(AlreadyClosedException.class, () -> { liveSeriesIndex.addSeries(ByteLabels.fromStrings("k1", "v1"), 0L, 100L); });
+        expectThrows(TSDBTragicException.class, () -> { liveSeriesIndex.addSeries(ByteLabels.fromStrings("k1", "v1"), 0L, 100L); });
     }
 
     public void testLoadSeriesFromIndexIOException() throws IOException {
@@ -298,5 +299,18 @@ public class LiveSeriesIndexTests extends OpenSearchTestCase {
         series.setMaxSeqNo(100);
 
         expectThrows(AlreadyClosedException.class, () -> { liveSeriesIndex.commitWithMetadata(List.of(series)); });
+    }
+
+    /**
+     * Test that TSDBTragicException is thrown when IndexWriter is closed.
+     */
+    public void testAddSeriesThrowsTragicException() throws IOException {
+        LiveSeriesIndex liveSeriesIndex = new LiveSeriesIndex(createTempDir("testTragicException"));
+
+        // Close the index - this makes indexWriter.isOpen() == false
+        liveSeriesIndex.close();
+
+        // addSeries should throw TSDBTragicException
+        assertThrows(TSDBTragicException.class, () -> liveSeriesIndex.addSeries(ByteLabels.fromStrings("k1", "v1"), 0L, 100L));
     }
 }

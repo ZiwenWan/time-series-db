@@ -12,6 +12,8 @@ import org.opensearch.ExceptionsHelper;
 import org.opensearch.common.logging.Loggers;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.core.index.shard.ShardId;
+import org.opensearch.index.engine.TSDBEmptyLabelException;
+import org.opensearch.index.engine.TSDBTragicException;
 import org.opensearch.tsdb.TSDBPlugin;
 import org.opensearch.tsdb.core.chunk.Chunk;
 import org.opensearch.tsdb.core.index.closed.ClosedChunkIndexManager;
@@ -129,19 +131,53 @@ public class Head {
      */
     public SeriesResult getOrCreateSeries(long hash, Labels labels, long timestamp) {
         MemSeries existingSeries = seriesMap.getByReference(hash);
-        if (existingSeries != null) {
+        boolean isFailedSeries = existingSeries != null && existingSeries.isFailed();
+
+        if (existingSeries != null && isFailedSeries == false) {
             return new SeriesResult(existingSeries, false);
         }
 
+        // create a new series, or replace existing failed one
         MemSeries newSeries = new MemSeries(hash, labels);
         MemSeries actualSeries = seriesMap.putIfAbsent(newSeries);
+        boolean isNewSeriesCreated = actualSeries == newSeries;
 
-        if (actualSeries == newSeries) {
-            liveSeriesIndex.addSeries(labels, hash, timestamp);
-            return new SeriesResult(newSeries, true);
-        } else {
-            return new SeriesResult(actualSeries, false);
+        // MemSeries has been added to the seriesMap. Mark it as failed in case of any errors from here.
+        try {
+            if (isNewSeriesCreated) {
+                liveSeriesIndex.addSeries(labels, hash, timestamp);
+                return new SeriesResult(newSeries, true);
+            } else {
+                return new SeriesResult(actualSeries, false);
+            }
+        } catch (Exception e) {
+            if (isNewSeriesCreated) {
+                markSeriesAsFailed(actualSeries);
+            }
+
+            throw e;
         }
+    }
+
+    /**
+     * Marks a series as failed and removes from the SeriesMap.
+     */
+    public void markSeriesAsFailed(MemSeries series) {
+        // Attempt to remove the failed series from the live index. Do not block on this if it results in failure,
+        // as eventually they will be cleaned up even otherwise.
+        // First attempt to delete the series, before removing it from the seriesMap. As soon as it is deleted from the
+        // seriesMap, there is possibility of a new series attempted to be inserted into the live index.
+        try {
+            liveSeriesIndex.removeSeries(List.of(series.getReference()));
+        } catch (Exception e) {
+            // Suppress the exception. Unused series will be cleaned up from the head eventually.
+            log.error("Failed to remove series from live series index", e);
+        }
+
+        // remove failed series from the seriesMap and mark it as deleted
+        seriesMap.delete(series);
+        series.markFailed();
+        series.markPersisted();
     }
 
     /**
@@ -368,73 +404,125 @@ public class Head {
         }
 
         @Override
-        public boolean preprocess(long seqNo, long reference, Labels labels, long timestamp, double value) {
-            // TODO: OOO support
-            MemSeries series = head.getSeriesMap().getByReference(reference);
-            if (series == null) {
-                Head.SeriesResult seriesResult = getOrCreateSeries(labels, reference, timestamp);
-                series = seriesResult.series();
-                seriesCreated = seriesResult.created();
-            }
-            this.series = series;
+        public boolean preprocess(long seqNo, long reference, Labels labels, long timestamp, double value, Runnable failureCallback) {
+            try {
+                // TODO: OOO support
+                MemSeries series = head.getSeriesMap().getByReference(reference);
+                if (series == null || series.isFailed()) {
+                    // Create a new series if none exists or if the existing series creation failed
+                    Head.SeriesResult seriesResult = getOrCreateSeries(labels, reference, timestamp);
+                    series = seriesResult.series();
+                    seriesCreated = seriesResult.created();
+                }
+                this.series = series;
 
-            // During translog replay, skip appending in-order samples that are older than the last mmap chunk
-            if (timestamp <= series.getMaxMMapTimestamp()) {
-                return false;
-            }
+                // During translog replay, skip appending in-order samples that are older than the last mmap chunk
+                if (timestamp <= series.getMaxMMapTimestamp()) {
+                    return false;
+                }
 
-            head.updateMaxSeenTimestamp(timestamp);
-            sample = new FloatSample(timestamp, value);
-            this.seqNo = seqNo;
-            return seriesCreated;
+                head.updateMaxSeenTimestamp(timestamp);
+                sample = new FloatSample(timestamp, value);
+                this.seqNo = seqNo;
+                return seriesCreated;
+            } catch (Exception e) {
+                // Mark series as failed if this thread created it
+                if (this.series != null && seriesCreated) {
+                    head.markSeriesAsFailed(this.series);
+                }
+
+                // failureCallback is executed after marking series as failed, as there is possibility of failure
+                if (e instanceof TSDBTragicException == false) {
+                    failureCallback.run();
+                }
+                throw e;
+            }
         }
 
         private Head.SeriesResult getOrCreateSeries(Labels labels, long hash, long timestamp) {
             if (labels == null || labels.isEmpty()) {
-                throw new IllegalStateException("Labels cannot be empty for ref: " + hash + ", timestamp: " + timestamp);
+                // TODO: switch back to IllegalStateException once OOO support is added
+                // throw new IllegalStateException("Labels cannot be empty for ref: " + hash + ", timestamp: " + timestamp);
+                throw new TSDBEmptyLabelException("Labels cannot be empty for ref: " + hash + ", timestamp: " + timestamp);
             }
 
             return head.getOrCreateSeries(hash, labels, timestamp);
         }
 
         @Override
-        public boolean append(Runnable callback) throws InterruptedException {
-            return appendSample(head.getAppendContext(), callback);
+        public boolean append(Runnable callback, Runnable failureCallback) throws InterruptedException {
+            return appendSample(head.getAppendContext(), callback, failureCallback);
         }
 
         /**
-         * Appends the pre-processed sample to the resolved series.
+         * Appends the pre-processed sample to the resolved series. The provided callback is executed within the series lock.
+         * The failureCallback is executed in case of errors. Note that callback and failureCallback are mutually exclusive,
+         * and will not be executed together.
          *
          * @param context  the append context containing options for chunk management
          * @param callback optional callback to execute under lock after appending the sample, this persists the series' labels
+         * @param failureCallback callback to execute in case of errors
          * @return true if sample was appended, false otherwise
          * @throws InterruptedException if the thread is interrupted while waiting for the series lock (append failed)
+         * @throws RuntimeException if series creation or translog write fails
          */
-        protected boolean appendSample(AppendContext context, Runnable callback) throws InterruptedException {
-            if (series != null) {
-                if (!seriesCreated) {
-                    // if this thread did not create the series, wait to ensure the series' labels are persisted to the translog
-                    series.awaitPersisted();
-                }
-                series.lock();
-                try {
-                    callback.run();
-                    if (seriesCreated) {
-                        // this thread created the series, and the callback has persisted the series' labels, so mark the series as
-                        // persisted
-                        series.markPersisted();
-                    }
-                    if (sample == null || series.isOOO(sample.getTimestamp())) {
-                        return false; // FIXME: OOO handling - for now skip to ensure compressed chunks are monotonically increasing
-                    }
+        protected boolean appendSample(AppendContext context, Runnable callback, Runnable failureCallback) throws InterruptedException {
+            if (series == null) {
+                failureCallback.run();
+                throw new RuntimeException("Append failed due to missing series");
+            }
 
-                    series.append(seqNo, sample.getTimestamp(), sample.getValue(), context.options());
-                    return true;
-                } finally {
-                    series.unlock();
+            if (!seriesCreated) {
+                // if this thread did not create the series, wait to ensure the series' labels are persisted to the translog
+                series.awaitPersisted();
+
+                // check if series is marked as failed after latch is counted down
+                if (series.isFailed()) {
+                    failureCallback.run();
+                    throw new RuntimeException("Append failed due to failed series");
                 }
             }
-            return false;
+
+            series.lock();
+            try {
+                // Execute the callback to write to translog under the series lock.
+                executeCallback(callback, failureCallback);
+
+                if (sample == null || series.isOOO(sample.getTimestamp())) {
+                    return false; // FIXME: OOO handling - for now skip to ensure compressed chunks are monotonically increasing
+                }
+
+                series.append(seqNo, sample.getTimestamp(), sample.getValue(), context.options());
+                return true;
+            } finally {
+                series.unlock();
+            }
+        }
+
+        /**
+         * Executes the callback. If callback execution fails, marks series as failed and executes the failure callback.
+         * This method is responsible for translog writes and updating status accordingly.
+         */
+        private void executeCallback(Runnable callback, Runnable failureCallback) {
+            try {
+                callback.run();
+            } catch (Exception e) {
+                if (seriesCreated) {
+                    // this thread created the series, mark it as failed
+                    head.markSeriesAsFailed(this.series);
+                }
+
+                if (e instanceof TSDBTragicException == false) {
+                    failureCallback.run();
+                }
+
+                throw e;
+            } finally {
+                if (seriesCreated) {
+                    // this thread created the series, mark the series as persisted
+                    series.markPersisted();
+                }
+            }
         }
 
         /**

@@ -49,6 +49,9 @@ public class MemSeries {
     // Indicates if the series labels have been written to the translog
     private final CountDownLatch firstWriteLatch = new CountDownLatch(1);
 
+    // Indicates if the series creation failed
+    private volatile boolean failed = false;
+
     // The seqNo corresponding to the most recent operation appended to this series
     private long maxSeqNo;
 
@@ -303,6 +306,21 @@ public class MemSeries {
      */
     public void markPersisted() {
         firstWriteLatch.countDown();
+    }
+
+    /**
+     * Check if the series creation failed.
+     * @return true if the series creation failed, false otherwise
+     */
+    public boolean isFailed() {
+        return failed;
+    }
+
+    /**
+     * Mark the series as failed, indicating either series creation or translog write failed.
+     */
+    public void markFailed() {
+        this.failed = true;
     }
 
     /**

@@ -32,6 +32,7 @@ import org.apache.lucene.util.BytesRef;
 import org.opensearch.ExceptionsHelper;
 import org.opensearch.common.io.stream.BytesStreamOutput;
 import org.opensearch.core.common.io.stream.BytesStreamInput;
+import org.opensearch.index.engine.TSDBTragicException;
 import org.opensearch.tsdb.core.head.MemSeries;
 import org.opensearch.tsdb.core.mapping.Constants;
 import org.opensearch.tsdb.core.model.Labels;
@@ -110,6 +111,10 @@ public class LiveSeriesIndex {
         try {
             indexWriter.addDocument(doc);
         } catch (Exception e) {
+            // Check for tragic exception - if IndexWriter encountered a fatal error, propagate it as tragic
+            if (indexWriter.getTragicException() != null || indexWriter.isOpen() == false) {
+                throw new TSDBTragicException("Tragic exception in LiveSeriesIndex", e);
+            }
             throw ExceptionsHelper.convertToRuntime(e);
         }
     }

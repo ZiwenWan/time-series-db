@@ -32,6 +32,7 @@ import org.opensearch.test.IndexSettingsModule;
 import org.opensearch.threadpool.FixedExecutorBuilder;
 import org.opensearch.threadpool.TestThreadPool;
 import org.opensearch.tsdb.TSDBPlugin;
+import org.opensearch.tsdb.core.head.MemSeries;
 import org.opensearch.tsdb.core.index.closed.ClosedChunkIndex;
 import org.opensearch.tsdb.core.model.ByteLabels;
 import org.opensearch.tsdb.core.model.Labels;
@@ -221,7 +222,7 @@ public class TSDBEngineTests extends EngineTestCase {
         expectThrows(UnsupportedOperationException.class, () -> metricsEngine.delete(delete));
     }
 
-    public void testNoOp() {
+    public void testNoOp() throws IOException {
         Engine.NoOp noOp = new Engine.NoOp(1, 1L, Engine.Operation.Origin.PRIMARY, System.nanoTime(), "test");
         Engine.NoOpResult result = metricsEngine.noOp(noOp);
         assertEquals(1L, result.getTerm());
@@ -313,11 +314,6 @@ public class TSDBEngineTests extends EngineTestCase {
         // Update timestamp - verify no exception is thrown
         metricsEngine.updateMaxUnsafeAutoIdTimestamp(1000L);
         metricsEngine.updateMaxUnsafeAutoIdTimestamp(2000L);
-    }
-
-    public void testFillSeqNoGaps() throws IOException {
-        int result = metricsEngine.fillSeqNoGaps(1L);
-        assertEquals(0, result);
     }
 
     public void testGetIndexBufferRAMBytesUsed() {
@@ -628,5 +624,170 @@ public class TSDBEngineTests extends EngineTestCase {
         Engine.IndexResult validResult3 = publishSample(3, validSample3);
         assertTrue("Valid sample after error should be created", validResult3.isCreated());
         assertNull("Valid sample after error should not have failure", validResult3.getFailure());
+    }
+
+    /**
+     * Test that NoOp operations are correctly handled by the engine.
+     * This validates sequence number tracking and translog recording.
+     */
+    public void testNoOpOperation() throws IOException {
+        long seqNo = 0;
+        long primaryTerm = 1;
+
+        // Create and execute a NoOp operation
+        Engine.NoOp noOp = new Engine.NoOp(seqNo, primaryTerm, Engine.Operation.Origin.PRIMARY, System.nanoTime(), "test no-op");
+        Engine.NoOpResult result = metricsEngine.noOp(noOp);
+
+        // Verify result
+        assertNotNull("NoOp result should not be null", result);
+        assertEquals("NoOp should have correct sequence number", seqNo, result.getSeqNo());
+        assertNull("NoOp should not have failure", result.getFailure());
+        assertNotNull("NoOp should have translog location", result.getTranslogLocation());
+
+        // Verify sequence number tracking
+        assertEquals("Processed checkpoint should be updated", seqNo, metricsEngine.getProcessedLocalCheckpoint());
+        assertEquals("Max seq no should be updated", seqNo, metricsEngine.getSeqNoStats(-1).getMaxSeqNo());
+    }
+
+    /**
+     * Test that NoOp operations from translog don't get re-added to translog.
+     */
+    public void testNoOpFromTranslog() throws IOException {
+        long seqNo = 0;
+        long primaryTerm = 1;
+
+        // Create NoOp from translog origin
+        Engine.NoOp noOp = new Engine.NoOp(
+            seqNo,
+            primaryTerm,
+            Engine.Operation.Origin.LOCAL_TRANSLOG_RECOVERY,
+            System.nanoTime(),
+            "translog replay"
+        );
+        Engine.NoOpResult result = metricsEngine.noOp(noOp);
+
+        // Verify result
+        assertNotNull("NoOp result should not be null", result);
+        assertEquals("NoOp should have correct sequence number", seqNo, result.getSeqNo());
+        assertNull("NoOp from translog should not have translog location", result.getTranslogLocation());
+
+        // Verify checkpoints are updated
+        assertEquals("Processed checkpoint should be updated", seqNo, metricsEngine.getProcessedLocalCheckpoint());
+        assertEquals("Persisted checkpoint should be updated", seqNo, metricsEngine.getPersistedLocalCheckpoint());
+    }
+
+    public void testFillSeqNoGaps() throws IOException {
+        long primaryTerm = 1;
+
+        // Index a sample to create seq no 0
+        String sample1 = createSampleJson(series1, 1000L, 100.0);
+        Engine.IndexResult result1 = publishSample(0, sample1);
+        assertTrue("First sample should be created", result1.isCreated());
+        assertEquals("First sample should have seq no 0", 0L, result1.getSeqNo());
+
+        // Manually advance max seq no by indexing NoOp operations to create gaps
+        for (long seqNo = 5; seqNo <= 10; seqNo++) {
+            Engine.NoOp noOp = new Engine.NoOp(seqNo, primaryTerm, Engine.Operation.Origin.PRIMARY, System.nanoTime(), "creating gap");
+            metricsEngine.noOp(noOp);
+        }
+
+        // Verify max seq no is 5
+        assertEquals("Max seq no should be 10", 10L, metricsEngine.getSeqNoStats(-1).getMaxSeqNo());
+
+        metricsEngine.translogManager().syncTranslog();
+        // fillSeqNoGaps should return 0 since there are no gaps
+        int numNoOps = metricsEngine.fillSeqNoGaps(primaryTerm);
+        assertEquals("Should have filled 4 gaps", 4, numNoOps);
+    }
+
+    /**
+     * Test that when a series is marked as failed, subsequent requests create a new series and succeed.
+     */
+    public void testFailedSeriesReplacementOnRetry() throws IOException {
+        // Index request
+        String sample1 = createSampleJson(series1, 1000L, 100.0);
+        Engine.IndexResult result1 = publishSample(0, sample1);
+        assertTrue("First sample should be created", result1.isCreated());
+
+        // Get series reference before marking as failed
+        MemSeries originalSeries = metricsEngine.getHead().getSeriesMap().getByReference(series1.stableHash());
+        assertNotNull("Original series should exist", originalSeries);
+
+        // Mark series as failed - this will delete it from the seriesMap
+        metricsEngine.getHead().markSeriesAsFailed(originalSeries);
+
+        // Verify series is removed from the map
+        MemSeries afterFailure = metricsEngine.getHead().getSeriesMap().getByReference(series1.stableHash());
+        assertNull("Failed series should be deleted from map", afterFailure);
+
+        // Index another request with same labels - should create a new series
+        String sample2 = createSampleJson(series1, 2000L, 150.0);
+        Engine.IndexResult result2 = publishSample(1, sample2);
+        assertTrue("Second sample should succeed", result2.isCreated());
+
+        // Check that a new series was created
+        MemSeries newSeries = metricsEngine.getHead().getSeriesMap().getByReference(series1.stableHash());
+        assertNotNull("New series should be created", newSeries);
+        assertNotSame("New series should be different from original", originalSeries, newSeries);
+        assertFalse("New series should not be marked as failed", newSeries.isFailed());
+    }
+
+    /**
+     * Test that empty label exception is temporarily ignored and operation succeeds.
+     * TODO: Delete this test once OOO support is added.
+     */
+    public void testEmptyLabelExceptionIgnored() throws IOException {
+        // Create a document with empty labels (no labels field) but with series reference
+        long seriesReference = 12345L;
+        String sampleJson = "{\"reference\":" + seriesReference + ",\"timestamp\":" + 1000L + ",\"value\":" + 100.0 + "}";
+
+        Engine.Index index = new Engine.Index(
+            new Term(IdFieldMapper.NAME, Uid.encodeId("test-id")),
+            new ParsedDocument(null, null, "test-id", null, null, new BytesArray(sampleJson), XContentType.JSON, null),
+            0,
+            1L,
+            1L,
+            VersionType.INTERNAL,
+            Engine.Operation.Origin.PRIMARY,
+            System.nanoTime(),
+            -1,
+            false,
+            SequenceNumbers.UNASSIGNED_SEQ_NO,
+            SequenceNumbers.UNASSIGNED_PRIMARY_TERM
+        );
+
+        Engine.IndexResult result = metricsEngine.index(index);
+
+        // Empty label exception is ignored, operation succeeds
+        assertTrue("Operation should succeed despite empty labels", result.isCreated());
+        assertNull(result.getFailure());
+        assertEquals("Seq no should be 0", 0L, result.getSeqNo());
+    }
+
+    /**
+     * Test that TSDBTragicException causes the engine to throw RuntimeException.
+     */
+    public void testTragicExceptionHandling() throws IOException {
+        // Close the engine to trigger tragic exception
+        metricsEngine.close();
+
+        String sample = createSampleJson(series1, 1000L, 100.0);
+        Engine.Index index = new Engine.Index(
+            new Term(IdFieldMapper.NAME, Uid.encodeId("test-id")),
+            new ParsedDocument(null, null, "test-id", null, null, new BytesArray(sample), XContentType.JSON, null),
+            0,
+            1L,
+            1L,
+            VersionType.INTERNAL,
+            Engine.Operation.Origin.PRIMARY,
+            System.nanoTime(),
+            -1,
+            false,
+            SequenceNumbers.UNASSIGNED_SEQ_NO,
+            SequenceNumbers.UNASSIGNED_PRIMARY_TERM
+        );
+
+        // Indexing on closed engine should throw RuntimeException
+        assertThrows(RuntimeException.class, () -> metricsEngine.index(index));
     }
 }

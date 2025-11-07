@@ -14,9 +14,11 @@ import org.apache.lucene.search.ReferenceManager;
 import org.apache.lucene.store.AlreadyClosedException;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
+import org.opensearch.ExceptionsHelper;
 import org.opensearch.common.concurrent.GatedCloseable;
 import org.opensearch.common.lucene.index.OpenSearchDirectoryReader;
 import org.opensearch.common.metrics.CounterMetric;
+import org.opensearch.common.util.concurrent.ReleasableLock;
 import org.opensearch.common.xcontent.XContentType;
 import org.opensearch.common.xcontent.smile.SmileXContent;
 import org.opensearch.core.common.bytes.BytesReference;
@@ -205,9 +207,25 @@ public class TSDBEngine extends Engine {
      */
     @Override
     public IndexResult index(Index index) throws IOException {
-        final Index indexOp;
+        // acquire readLock to indicate there is ongoing indexing operation
+        try (ReleasableLock ignored = readLock.acquire()) {
+            return innerIndex(index);
+        }
+    }
 
-        // generate new seq number, or catch up
+    private IndexResult innerIndex(Index index) throws IOException {
+        // Parse indexing request payload to build TSDBDocument first before sequence number generation to avoid
+        // consuming sequence numbers for invalid documents
+        TSDBDocument metricDocument;
+        try {
+            metricDocument = TSDBDocument.fromParsedDocument(index.parsedDoc());
+        } catch (Exception e) {
+            logger.error("Index operation failed during document parsing, operation origin " + index.origin().name(), e);
+            return new IndexResult(e, index.version());
+        }
+
+        // Generate new sequence number, or catch up
+        final Index indexOp;
         if (index.origin() == Operation.Origin.PRIMARY) {
             indexOp = new Index(
                 index.uid(),
@@ -228,49 +246,160 @@ public class TSDBEngine extends Engine {
             localCheckpointTracker.advanceMaxSeqNo(index.seqNo());
         }
 
-        // parse indexing request source payload to build TSDBDocument
-        TSDBDocument metricDocument;
-        try {
-            metricDocument = TSDBDocument.fromParsedDocument(indexOp.parsedDoc());
-        } catch (RuntimeException e) {
-            return new IndexResult(e, indexOp.version());
-        }
-
-        // generate series reference as stable hash of labels if not provided
+        // Generate series reference as stable hash of labels if not provided
         long seriesReference = metricDocument.seriesReference() == null
             ? metricDocument.labels().stableHash()
             : metricDocument.seriesReference();
 
         Appender appender = head.newAppender();
-        boolean isNewSeriesCreated = false;
+
+        // Container to capture index operation context for the translog location and errors
+        final IndexOperationContext context = new IndexOperationContext();
+
+        // TODO: delete this once OOO is supported
+        boolean emptyLabelExceptionEncountered = false;
+
         try {
-            isNewSeriesCreated = appender.preprocess(
+            context.isNewSeriesCreated = appender.preprocess(
                 indexOp.seqNo(),
                 seriesReference,
                 metricDocument.labels(),
                 metricDocument.timestamp(),
-                metricDocument.value()
+                metricDocument.value(),
+                () -> writeNoopOperationToTranslog(indexOp, context)
             );
-        } catch (IllegalStateException e) {
-            logger.error("Index operation failed, operation origin " + indexOp.origin().name() + " with cause " + e.getMessage());
-            // TODO: check if we need to write no-op entry into translog
+
+            // preprocess succeeded, now call append
+            appender.append(
+                () -> writeIndexingOperationToTranslog(indexOp, seriesReference, metricDocument, context),
+                () -> writeNoopOperationToTranslog(indexOp, context)
+            );
+        } catch (TSDBEmptyLabelException e) {
+            // TODO: delete this once OOO is supported
+            logger.error("Encountered empty label exception, operation origin " + indexOp.origin().name(), e);
+            emptyLabelExceptionEncountered = true;
+        } catch (Exception e) {
+            logger.error("Index operation failed during preprocess or append, operation origin " + indexOp.origin().name(), e);
+            context.failureException = e;
         }
 
-        var indexResult = new IndexResult(indexOp.version(), indexOp.primaryTerm(), indexOp.seqNo(), true);
+        // TODO: We ignore empty label exceptions temporarily. Delete this once OOO support is added.
+        if (emptyLabelExceptionEncountered) {
+            context.failureException = null;
+        }
 
-        // Append the sample with a callback to handle translog and checkpointing
+        return buildIndexResult(indexOp, context);
+    }
+
+    /**
+     * Builds the IndexResult based on the indexing operation context.
+     *
+     * @param indexOp the index operation
+     * @param context the index operation context
+     * @return the IndexResult for this operation
+     */
+    private IndexResult buildIndexResult(Index indexOp, IndexOperationContext context) {
+        // Check if there was a failure
+        if (context.failureException != null) {
+            // Check if document failure should be treated as tragic error
+            boolean isTragicException = context.failureException instanceof TSDBTragicException;
+            boolean treatDocumentFailureAsTragic = treatDocumentFailureAsTragicError(indexOp)
+                && context.failureException instanceof AlreadyClosedException == false;
+            if (isTragicException || treatDocumentFailureAsTragic) {
+                handleTragicError(indexOp, context.failureException);
+            }
+
+            IndexResult failureResult = new IndexResult(
+                context.failureException,
+                indexOp.version(),
+                indexOp.primaryTerm(),
+                indexOp.seqNo()
+            );
+            failureResult.setTranslogLocation(context.translogLocation);
+            return failureResult;
+        } else {
+            IndexResult successResult = new IndexResult(indexOp.version(), indexOp.primaryTerm(), indexOp.seqNo(), true);
+            successResult.setTranslogLocation(context.translogLocation);
+            return successResult;
+        }
+    }
+
+    /**
+     * Handles successful indexing by writing to translog and updating checkpoint tracker.
+     * To be executed within the series lock.
+     *
+     * @param indexOp the index operation
+     * @param seriesReference the series reference
+     * @param metricDocument the parsed metric document
+     * @param context the index operation context
+     */
+    private void writeIndexingOperationToTranslog(
+        Index indexOp,
+        long seriesReference,
+        TSDBDocument metricDocument,
+        IndexOperationContext context
+    ) {
         try {
-            // TODO: Handle failure scenarios in rewriting document source and translog writes, which skips counting down
-            // the series latch. If this happens, subsequent writes to the time series will be blocked.
-            // Creating new series and translog writes both should be under a single lock to prevent this edge case.
-            rewriteParsedDocumentSource(indexOp, seriesReference, metricDocument, isNewSeriesCreated);
-            appender.append(() -> handlePostAppendCallback(indexOp, indexResult));
-        } catch (InterruptedException | IOException e) {
-            // TODO: handle append failures correctly via IndexResult when applicable
-            throw new RuntimeException(e);
+            rewriteParsedDocumentSource(indexOp, seriesReference, metricDocument, context.isNewSeriesCreated);
+            context.translogLocation = translogManager.add(
+                new Translog.Index(indexOp, new IndexResult(indexOp.version(), indexOp.primaryTerm(), indexOp.seqNo(), true))
+            );
+            localCheckpointTracker.markSeqNoAsProcessed(indexOp.seqNo());
+        } catch (IOException e) {
+            // Check for tragic exception - if translog encountered a fatal error, propagate it as tragic
+            if (translogManager.getTragicExceptionIfClosed() == e) {
+                throw new TSDBTragicException("Tragic exception during translog write", e);
+            }
+            throw new RuntimeException("Failed in index success callback", e);
         }
+    }
 
-        return indexResult;
+    /**
+     * Handles indexing failure by recording a NoOp in translog and updating checkpoint tracker.
+     * This does not have to be executed within the series lock.
+     *
+     * @param indexOp the index operation
+     * @param context the index operation context
+     */
+    private void writeNoopOperationToTranslog(Index indexOp, IndexOperationContext context) {
+        try {
+            if (indexOp.origin().isFromTranslog() == false && indexOp.seqNo() != SequenceNumbers.UNASSIGNED_SEQ_NO) {
+                final NoOp noOp = new NoOp(
+                    indexOp.seqNo(),
+                    indexOp.primaryTerm(),
+                    indexOp.origin(),
+                    indexOp.startTime(),
+                    context.failureException != null ? context.failureException.toString() : "unknown failure"
+                );
+                context.translogLocation = translogManager.add(new Translog.NoOp(noOp.seqNo(), noOp.primaryTerm(), noOp.reason()));
+            }
+            localCheckpointTracker.markSeqNoAsProcessed(indexOp.seqNo());
+            if (context.translogLocation == null) {
+                // the operation is coming from the translog and is already persisted or has unassigned sequence number
+                localCheckpointTracker.markSeqNoAsPersisted(indexOp.seqNo());
+            }
+        } catch (IOException e) {
+            // Check for tragic exception - if translog encountered a fatal error, propagate it as tragic
+            if (translogManager.getTragicExceptionIfClosed() == e) {
+                throw new TSDBTragicException("Tragic exception during translog write", e);
+            }
+            throw new RuntimeException("Failed during failure callback", e);
+        }
+    }
+
+    /**
+     * Handles tragic errors by failing the engine and propagating the exception.
+     *
+     * @param indexOp the index operation
+     * @param e the exception to handle as tragic
+     */
+    private void handleTragicError(Index indexOp, Exception e) {
+        try {
+            failEngine("index id[" + indexOp.id() + "] origin[" + indexOp.origin() + "] seq#[" + indexOp.seqNo() + "]", e);
+        } catch (Exception inner) {
+            e.addSuppressed(inner);
+        }
+        throw ExceptionsHelper.convertToRuntime(e);
     }
 
     /**
@@ -282,14 +411,39 @@ public class TSDBEngine extends Engine {
     }
 
     /**
-     * Processes a no-op operation.
+     * Processes a no-op operation. This will only be called during recovery flows.
      *
      * @param noOp the no-op operation
      * @return a NoOpResult with the operation's primary term and sequence number
+     * @throws IOException if an I/O error occurs
      */
     @Override
-    public NoOpResult noOp(NoOp noOp) {
-        return new NoOpResult(noOp.primaryTerm(), noOp.seqNo());
+    public NoOpResult noOp(NoOp noOp) throws IOException {
+        // Acquire readLock to indicate there is ongoing indexing operation
+        // This will only be called in the recovery flow and hence this method does not use a sequence number lock
+        try (ReleasableLock ignored = readLock.acquire()) {
+            ensureOpen();
+            localCheckpointTracker.advanceMaxSeqNo(noOp.seqNo());
+            final NoOpResult noOpResult = new NoOpResult(noOp.primaryTerm(), noOp.seqNo());
+
+            // Add to translog if not from translog
+            if (noOp.origin().isFromTranslog() == false && noOpResult.getResultType() == Result.Type.SUCCESS) {
+                final Translog.Location location = translogManager.add(new Translog.NoOp(noOp.seqNo(), noOp.primaryTerm(), noOp.reason()));
+                noOpResult.setTranslogLocation(location);
+            }
+
+            // Update checkpoint tracker
+            localCheckpointTracker.markSeqNoAsProcessed(noOpResult.getSeqNo());
+            if (noOpResult.getTranslogLocation() == null) {
+                // the operation is coming from the translog (and is hence persisted already) or it does not have a sequence number
+                assert noOp.origin().isFromTranslog() || noOpResult.getSeqNo() == SequenceNumbers.UNASSIGNED_SEQ_NO;
+                localCheckpointTracker.markSeqNoAsPersisted(noOpResult.getSeqNo());
+            }
+
+            noOpResult.setTook(System.nanoTime() - noOp.startTime());
+            noOpResult.freeze();
+            return noOpResult;
+        }
     }
 
     /**
@@ -654,15 +808,45 @@ public class TSDBEngine extends Engine {
     }
 
     /**
-     * Fills gaps in sequence numbers by indexing no-op operations.
+     * Fills gaps in sequence numbers by indexing no-op operations. This method is a modified version of the
+     * {@code InternalEngine.fillSeqNoGaps()} method.
      *
      * @param primaryTerm the primary term
-     * @return 0 until implemented
+     * @return the number of no-ops added
+     * @throws IOException if an I/O error occurs
      */
     @Override
     public int fillSeqNoGaps(long primaryTerm) throws IOException {
-        // TODO: this might be needed when no-op index results are added for error handling
-        return 0;
+        // acquire write lock to prevent concurrent writes
+        try (ReleasableLock ignored = writeLock.acquire()) {
+            ensureOpen();
+            final long localCheckpoint = localCheckpointTracker.getProcessedCheckpoint();
+            final long maxSeqNo = localCheckpointTracker.getMaxSeqNo();
+            int numNoOpsAdded = 0;
+            for (long seqNo = localCheckpoint + 1; seqNo <= maxSeqNo; seqNo = localCheckpointTracker.getProcessedCheckpoint() + 1) {
+                final NoOp noOp = new NoOp(seqNo, primaryTerm, Operation.Origin.PRIMARY, System.nanoTime(), "filling gaps");
+                final NoOpResult noOpResult = noOp(noOp);
+                if (noOpResult.getFailure() != null) {
+                    // If we fail to add a no-op for filling gaps, we should fail the engine
+                    throw new EngineException(shardId, "failed to fill sequence number gap [" + seqNo + "]", noOpResult.getFailure());
+                }
+                numNoOpsAdded++;
+                assert seqNo <= localCheckpointTracker.getProcessedCheckpoint() : "local checkpoint did not advance; was ["
+                    + seqNo
+                    + "], now ["
+                    + localCheckpointTracker.getProcessedCheckpoint()
+                    + "]";
+            }
+            translogManager.syncTranslog();
+            assert localCheckpointTracker.getPersistedCheckpoint() == maxSeqNo
+                : "persisted local checkpoint did not advance to max seq no; is ["
+                    + localCheckpointTracker.getPersistedCheckpoint()
+                    + "], max seq no ["
+                    + maxSeqNo
+                    + "]";
+            logger.info("Filled {} sequence number gaps for primary term {}", numNoOpsAdded, primaryTerm);
+            return numNoOpsAdded;
+        }
     }
 
     /**
@@ -943,35 +1127,6 @@ public class TSDBEngine extends Engine {
     }
 
     /**
-     * Callback executed after appending a sample to handle translog operations and checkpoint tracking.
-     * This is executed by the Head under a series lock to ensure atomicity.
-     *
-     * @param index the index operation
-     * @param indexResult the index result to update with translog location
-     */
-    private void handlePostAppendCallback(Index index, IndexResult indexResult) {
-        // Add to translog for all operations that are not from translog itself
-        if (!index.origin().isFromTranslog()) {
-            try {
-                final var location = translogManager.add(new Translog.Index(index, indexResult));
-                indexResult.setTranslogLocation(location);
-            } catch (IOException e) {
-                throw new RuntimeException("Failed to add to translog", e);
-            }
-        }
-
-        // Mark the sequence number as processed
-        localCheckpointTracker.markSeqNoAsProcessed(index.seqNo());
-
-        // Mark as persisted if already in translog or has no sequence number
-        if (indexResult.getTranslogLocation() == null) {
-            // the op is coming from the translog (and is hence persisted already) or it does not have a sequence number
-            assert index.origin().isFromTranslog() || indexResult.getSeqNo() == SequenceNumbers.UNASSIGNED_SEQ_NO;
-            localCheckpointTracker.markSeqNoAsPersisted(indexResult.getSeqNo());
-        }
-    }
-
-    /**
      * Rewrites the parsed document source to include series reference.
      *
      * <p>For new series, includes labels in the source for deterministic replays.
@@ -1059,8 +1214,28 @@ public class TSDBEngine extends Engine {
         return metadataStore;
     }
 
+    /**
+     * Returns head, visible for testing only.
+     * @return an instance of {@link Head}
+     */
+    Head getHead() {
+        return head;
+    }
+
     private Store getStore() {
         return store;
+    }
+
+    /**
+     * This is similar to {@code InternalEngine}
+     * Whether we should treat any document failure as tragic error.
+     * If we hit any failure while processing an indexing on a replica, we should treat that error as tragic and fail the engine.
+     * However, we prefer to fail a request individually (instead of a shard) if we hit a document failure on the primary.
+     */
+    private boolean treatDocumentFailureAsTragicError(Index index) {
+        return index.origin() == Operation.Origin.REPLICA
+            || index.origin() == Operation.Origin.PEER_RECOVERY
+            || index.origin() == Operation.Origin.LOCAL_RESET;
     }
 
     /**
@@ -1147,6 +1322,16 @@ public class TSDBEngine extends Engine {
         public boolean isDeleted() {
             return false;
         }
+    }
+
+    /**
+     * Container class to capture state and results during index operation execution.
+     * Used to pass information between the engine and head structure.
+     */
+    private static class IndexOperationContext {
+        Translog.Location translogLocation = null;
+        Exception failureException = null;
+        boolean isNewSeriesCreated = false;
     }
 
     private class CheckpointedMetadataStore implements MetadataStore {

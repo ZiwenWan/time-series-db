@@ -18,9 +18,11 @@ import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.util.BytesRef;
 import org.mockito.Mockito;
+import org.opensearch.common.SuppressForbidden;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.core.index.shard.ShardId;
+import org.opensearch.index.engine.TSDBEmptyLabelException;
 import org.opensearch.test.OpenSearchTestCase;
 import org.opensearch.threadpool.FixedExecutorBuilder;
 import org.opensearch.threadpool.TestThreadPool;
@@ -34,6 +36,7 @@ import org.opensearch.tsdb.core.compaction.NoopCompaction;
 import org.opensearch.tsdb.core.index.closed.ClosedChunk;
 import org.opensearch.tsdb.core.index.closed.ClosedChunkIndexIO;
 import org.opensearch.tsdb.core.index.closed.ClosedChunkIndexManager;
+import org.opensearch.tsdb.core.index.live.LiveSeriesIndex;
 import org.opensearch.tsdb.core.model.ByteLabels;
 import org.opensearch.tsdb.core.model.Labels;
 import org.opensearch.tsdb.core.retention.NOOPRetention;
@@ -47,6 +50,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.mockito.Mockito.doReturn;
 
@@ -108,8 +112,8 @@ public class HeadTests extends OpenSearchTestCase {
                 expectedValues.add((double) i);
 
                 Head.HeadAppender appender = head.newAppender();
-                appender.preprocess(0, 0, seriesLabels, sample++, i);
-                appender.appendSample(context, () -> {});
+                appender.preprocess(0, 0, seriesLabels, sample++, i, () -> {});
+                appender.appendSample(context, () -> {}, () -> {});
             }
         }
 
@@ -183,8 +187,8 @@ public class HeadTests extends OpenSearchTestCase {
         assertEquals("getNumSeries returns 1", 1, head.getNumSeries());
         for (int i = 0; i < 10; i++) {
             Head.HeadAppender appender = head.newAppender();
-            appender.preprocess(i, seriesWithData.stableHash(), seriesWithData, i * 100L, i * 10.0);
-            appender.appendSample(context, () -> {});
+            appender.preprocess(i, seriesWithData.stableHash(), seriesWithData, i * 100L, i * 10.0, () -> {});
+            appender.appendSample(context, () -> {}, () -> {});
         }
 
         assertEquals("getNumSeries returns 2", 2, head.getNumSeries());
@@ -234,12 +238,12 @@ public class HeadTests extends OpenSearchTestCase {
 
         for (int i = 0; i < 12; i++) {
             Head.HeadAppender appender1 = head.newAppender();
-            appender1.preprocess(i, series1Reference, series1, 100 * (i + 1), 10 * i);
-            appender1.appendSample(context, () -> {});
+            appender1.preprocess(i, series1Reference, series1, 100 * (i + 1), 10 * i, () -> {});
+            appender1.appendSample(context, () -> {}, () -> {});
 
             Head.HeadAppender appender2 = head.newAppender();
-            appender2.preprocess(i, series2Reference, series2, 10 * (i + 1), 10 * i);
-            appender2.appendSample(context, () -> {});
+            appender2.preprocess(i, series2Reference, series2, 10 * (i + 1), 10 * i, () -> {});
+            appender2.appendSample(context, () -> {}, () -> {});
         }
 
         // 10 samples per chunk, so closing head chunks at 12 should leave 2 in-memory in the live chunk
@@ -271,24 +275,24 @@ public class HeadTests extends OpenSearchTestCase {
         int i = 0;
         while (i < 10) {
             Head.HeadAppender appender1 = newHead.newAppender();
-            appender1.preprocess(i, series1Reference, series1, 100L * (i + 1), 10 * i);
-            assertFalse("Previously MMAPed sample is not appended again", appender1.appendSample(context, () -> {}));
+            appender1.preprocess(i, series1Reference, series1, 100L * (i + 1), 10 * i, () -> {});
+            assertFalse("Previously MMAPed sample is not appended again", appender1.appendSample(context, () -> {}, () -> {}));
 
             Head.HeadAppender appender2 = newHead.newAppender();
-            appender2.preprocess(i, series2Reference, series2, 10L * (i + 1), 10 * i);
-            assertFalse("Previously MMAPed sample is not appended again", appender2.appendSample(context, () -> {}));
+            appender2.preprocess(i, series2Reference, series2, 10L * (i + 1), 10 * i, () -> {});
+            assertFalse("Previously MMAPed sample is not appended again", appender2.appendSample(context, () -> {}, () -> {}));
             i++;
         }
 
         // non MMAPed samples are appended
         while (i < 12) {
             Head.HeadAppender appender1 = newHead.newAppender();
-            appender1.preprocess(i, series1Reference, series1, 100L * (i + 1), 10 * i);
-            assertTrue("Previously in-memory sample is appended", appender1.appendSample(context, () -> {}));
+            appender1.preprocess(i, series1Reference, series1, 100L * (i + 1), 10 * i, () -> {});
+            assertTrue("Previously in-memory sample is appended", appender1.appendSample(context, () -> {}, () -> {}));
 
             Head.HeadAppender appender2 = newHead.newAppender();
-            appender2.preprocess(i, series2Reference, series2, 10L * (i + 1), 10 * i);
-            assertTrue("Previously in-memory sample is appended", appender2.appendSample(context, () -> {}));
+            appender2.preprocess(i, series2Reference, series2, 10L * (i + 1), 10 * i, () -> {});
+            assertTrue("Previously in-memory sample is appended", appender2.appendSample(context, () -> {}, () -> {}));
             i++;
         }
 
@@ -325,8 +329,8 @@ public class HeadTests extends OpenSearchTestCase {
         var seqNo = 0;
         for (int i = 0; i < 32; i++) {
             Head.HeadAppender appender = head.newAppender();
-            appender.preprocess(seqNo++, series1Reference, series1, step * (i + 1), 10 * i);
-            appender.appendSample(context, () -> {});
+            appender.preprocess(seqNo++, series1Reference, series1, step * (i + 1), 10 * i, () -> {});
+            appender.appendSample(context, () -> {}, () -> {});
         }
 
         // Validate 4 indexes are created and closeHeadChunks return correct minSeq.
@@ -339,8 +343,8 @@ public class HeadTests extends OpenSearchTestCase {
         long series2Reference = 2L;
         for (int i = 0; i < 64; i++) {
             Head.HeadAppender appender = head.newAppender();
-            appender.preprocess(seqNo++, series2Reference, series2, step * (i + 1), 10 * i);
-            appender.appendSample(context, () -> {});
+            appender.preprocess(seqNo++, series2Reference, series2, step * (i + 1), 10 * i, () -> {});
+            appender.appendSample(context, () -> {}, () -> {});
         }
 
         // Setup to stop flushing of chunks at second chunk
@@ -511,6 +515,193 @@ public class HeadTests extends OpenSearchTestCase {
         closedChunkIndexManager.close();
     }
 
+    /**
+     * Test preprocess with concurrent threads and a single liveSeriesIndex.addSeries failure.
+     * This simulates a race condition in seriesMap.putIfAbsent where a failed series might be deleted
+     * from the map while another thread is trying to create it.
+     */
+    @SuppressForbidden(reason = "reflection usage is required here")
+    public void testPreprocessConcurrentWithAddSeriesFailure() throws Exception {
+        ShardId shardId = new ShardId("headTest", "headTestUid", 0);
+        Path metricsPath = createTempDir("testPreprocessConcurrentWithAddSeriesFailure");
+        ClosedChunkIndexManager closedChunkIndexManager = new ClosedChunkIndexManager(
+            metricsPath,
+            new InMemoryMetadataStore(),
+            new NOOPRetention(),
+            new NoopCompaction(),
+            threadPool,
+            shardId,
+            defaultSettings
+        );
+
+        // Create a spy on LiveSeriesIndex to inject failures
+        Head head = new Head(metricsPath, shardId, closedChunkIndexManager, defaultSettings);
+        LiveSeriesIndex liveSeriesIndexSpy = Mockito.spy(head.getLiveSeriesIndex());
+
+        // Use reflection to replace the liveSeriesIndex with the spy
+        java.lang.reflect.Field liveSeriesIndexField = Head.class.getDeclaredField("liveSeriesIndex");
+        liveSeriesIndexField.setAccessible(true);
+        liveSeriesIndexField.set(head, liveSeriesIndexSpy);
+
+        int numThreads = 50;
+        int iterations = 100;
+
+        for (int iter = 0; iter < iterations; iter++) {
+            final int currentIter = iter;
+            Labels currentLabels = ByteLabels.fromStrings("k1", "v1", "iteration", String.valueOf(currentIter));
+            long currentHash = currentLabels.stableHash();
+
+            // Introduce a single failure in addSeries for each iteration
+            AtomicInteger callCount = new AtomicInteger(0);
+            Mockito.doAnswer(invocation -> {
+                if (callCount.incrementAndGet() == 1) {
+                    // First call fails
+                    throw new RuntimeException("Simulated addSeries failure");
+                }
+                // Subsequent calls succeed
+                invocation.callRealMethod();
+                return null;
+            }).when(liveSeriesIndexSpy).addSeries(Mockito.any(), Mockito.anyLong(), Mockito.anyLong());
+
+            Boolean[] results = new Boolean[numThreads];
+            Exception[] exceptions = new Exception[numThreads];
+            Thread[] threads = new Thread[numThreads];
+            CountDownLatch startLatch = new CountDownLatch(1);
+
+            for (int i = 0; i < numThreads; i++) {
+                int threadId = i;
+                threads[i] = new Thread(() -> {
+                    try {
+                        startLatch.await();
+                        Head.HeadAppender appender = head.newAppender();
+                        results[threadId] = appender.preprocess(
+                            currentIter * numThreads + threadId,
+                            currentHash,
+                            currentLabels,
+                            1000L + threadId,
+                            100.0 + threadId,
+                            () -> {}
+                        );
+                    } catch (Exception e) {
+                        exceptions[threadId] = e;
+                    }
+                });
+            }
+
+            for (Thread thread : threads) {
+                thread.start();
+            }
+
+            startLatch.countDown(); // Start all threads at the same time
+
+            for (Thread thread : threads) {
+                thread.join(5000);
+            }
+
+            // There are only 2 possible scenarios:
+            // 1. A new series is created after the initial one is deleted (1 thread returns true from preprocess)
+            // 2. No new series is created (0 threads return true from preprocess)
+
+            // Check 1: Exactly 1 exception must be thrown (from the thread that hit addSeries failure)
+            int exceptionCount = 0;
+            for (int i = 0; i < numThreads; i++) {
+                if (exceptions[i] != null) {
+                    exceptionCount++;
+                }
+            }
+            assertEquals("Exactly one thread must throw exception for iteration " + currentIter, 1, exceptionCount);
+
+            // Check 2: Count how many threads returned true from preprocess (created series)
+            int createdCount = 0;
+            for (int i = 0; i < numThreads; i++) {
+                if (results[i] != null && results[i]) {
+                    createdCount++;
+                }
+            }
+            assertTrue(
+                "Either 0 or 1 thread should return true from preprocess for iteration " + currentIter,
+                createdCount == 0 || createdCount == 1
+            );
+
+            // Check 3: If a thread returned true, verify series exists and is not marked failed
+            if (createdCount == 1) {
+                MemSeries series = head.getSeriesMap().getByReference(currentHash);
+                assertNotNull("Series must exist if a thread returned true from preprocess for iteration " + currentIter, series);
+                assertFalse("Series must not be marked as failed for iteration " + currentIter, series.isFailed());
+            } else {
+                assertNull(head.getSeriesMap().getByReference(currentHash));
+            }
+        }
+
+        head.close();
+        closedChunkIndexManager.close();
+    }
+
+    /**
+     * Test that markSeriesAsFailed removes the series from the LiveSeriesIndex.
+     */
+    public void testMarkSeriesAsFailed() throws Exception {
+        ShardId shardId = new ShardId("headTest", "headTestUid", 0);
+        Path metricsPath = createTempDir("testMarkSeriesAsFailed");
+        ClosedChunkIndexManager closedChunkIndexManager = new ClosedChunkIndexManager(
+            metricsPath,
+            new InMemoryMetadataStore(),
+            new NOOPRetention(),
+            new NoopCompaction(),
+            threadPool,
+            shardId,
+            defaultSettings
+        );
+
+        Head head = new Head(metricsPath, shardId, closedChunkIndexManager, defaultSettings);
+
+        // Preprocess a new series successfully
+        Labels labels = ByteLabels.fromStrings("k1", "v1", "k2", "v2");
+        long hash = labels.stableHash();
+        Head.HeadAppender appender = head.newAppender();
+        boolean created = appender.preprocess(0, hash, labels, 1000L, 100.0, () -> {});
+
+        assertTrue("Series should be created", created);
+        MemSeries series = head.getSeriesMap().getByReference(hash);
+        assertNotNull("Series should exist in seriesMap", series);
+
+        // Refresh the reader to see the newly added series
+        head.getLiveSeriesIndex().getDirectoryReaderManager().maybeRefresh();
+
+        // Verify series exists in LiveSeriesIndex by counting documents
+        DirectoryReader readerBefore = head.getLiveSeriesIndex().getDirectoryReaderManager().acquire();
+        try {
+            int seriesCountBefore = readerBefore.numDocs();
+            assertEquals("Should have 1 series in live index", 1, seriesCountBefore);
+        } finally {
+            head.getLiveSeriesIndex().getDirectoryReaderManager().release(readerBefore);
+        }
+
+        // Mark series as failed
+        head.markSeriesAsFailed(series);
+
+        // Verify series is marked as failed
+        assertTrue("Series should be marked as failed", series.isFailed());
+
+        // Verify series is deleted from seriesMap
+        assertNull("Series should be removed from seriesMap", head.getSeriesMap().getByReference(hash));
+
+        // Refresh the reader to see the deletion
+        head.getLiveSeriesIndex().getDirectoryReaderManager().maybeRefresh();
+
+        // Verify series is deleted from LiveSeriesIndex by counting documents
+        DirectoryReader readerAfter = head.getLiveSeriesIndex().getDirectoryReaderManager().acquire();
+        try {
+            int seriesCountAfter = readerAfter.numDocs();
+            assertEquals("Should have 0 series in live index after marking as failed", 0, seriesCountAfter);
+        } finally {
+            head.getLiveSeriesIndex().getDirectoryReaderManager().release(readerAfter);
+        }
+
+        head.close();
+        closedChunkIndexManager.close();
+    }
+
     // Utility method to return all chunks from both LiveSeriesIndex and ClosedChunkIndexes
     private List<Object> getChunks(Head head, ClosedChunkIndexManager closedChunkIndexManager) throws IOException {
         List<Object> chunks = new ArrayList<>();
@@ -665,8 +856,8 @@ public class HeadTests extends OpenSearchTestCase {
                     try {
                         startLatch.await();
                         Head.HeadAppender appender = head.newAppender();
-                        boolean created = appender.preprocess(threadId, hash, labels, 100L + threadId, 1.0);
-                        appender.append(() -> createdResults.add(created));
+                        boolean created = appender.preprocess(threadId, hash, labels, 100L + threadId, 1.0, () -> {});
+                        appender.append(() -> createdResults.add(created), () -> {});
                     } catch (InterruptedException e) {
                         fail("Thread was interrupted: " + e.getMessage());
                     }
@@ -693,6 +884,236 @@ public class HeadTests extends OpenSearchTestCase {
             assertNotNull("Series should exist", series);
             assertEquals("One series created per iteration", iter + 1, head.getNumSeries());
         }
+
+        head.close();
+        closedChunkIndexManager.close();
+    }
+
+    public void testPreprocessFailure() throws IOException {
+        Path tempDir = createTempDir();
+        ShardId shardId = new ShardId("test", "test", 0);
+        ClosedChunkIndexManager closedChunkIndexManager = new ClosedChunkIndexManager(
+            tempDir,
+            new InMemoryMetadataStore(),
+            new NOOPRetention(),
+            new NoopCompaction(),
+            threadPool,
+            shardId,
+            defaultSettings
+        );
+        Head head = new Head(tempDir, shardId, closedChunkIndexManager, defaultSettings);
+
+        // Pass empty labels to trigger failure in preprocess
+        Labels emptyLabels = ByteLabels.fromStrings(); // Empty labels
+        long hash = 12345L;
+
+        Head.HeadAppender appender = head.newAppender();
+
+        // Expect exception for empty labels
+        TSDBEmptyLabelException ex = assertThrows(
+            TSDBEmptyLabelException.class,
+            () -> appender.preprocess(0, hash, emptyLabels, 2000L, 100.0, () -> {})
+        );
+        assertTrue(ex.getMessage().contains("Labels"));
+
+        head.close();
+        closedChunkIndexManager.close();
+    }
+
+    public void testPreprocessFailureDeletesSeries() throws IOException {
+        Path tempDir = createTempDir();
+        ShardId shardId = new ShardId("test", "test", 0);
+        ClosedChunkIndexManager closedChunkIndexManager = new ClosedChunkIndexManager(
+            tempDir,
+            new InMemoryMetadataStore(),
+            new NOOPRetention(),
+            new NoopCompaction(),
+            threadPool,
+            shardId,
+            defaultSettings
+        );
+        Head head = new Head(tempDir, shardId, closedChunkIndexManager, defaultSettings);
+
+        // Close the live series index to trigger exception during series creation
+        head.getLiveSeriesIndex().close();
+
+        Labels labels = ByteLabels.fromStrings("__name__", "test_metric", "host", "server1");
+        long hash = labels.stableHash();
+
+        Head.HeadAppender appender = head.newAppender();
+        boolean[] failureCallbackCalled = { false };
+
+        // Preprocess should fail when trying to add series to closed index
+        // This will throw a TSDBTragicException (or RuntimeException wrapping it)
+        assertThrows(
+            RuntimeException.class,
+            () -> appender.preprocess(0, hash, labels, 2000L, 100.0, () -> failureCallbackCalled[0] = true)
+        );
+
+        assertFalse("Failure callback should not be called for tragic exceptions", failureCallbackCalled[0]);
+
+        MemSeries series = head.getSeriesMap().getByReference(hash);
+        assertNull("Series should be deleted on failure", series);
+
+        closedChunkIndexManager.close();
+    }
+
+    public void testAppendWithNullSeries() throws IOException, InterruptedException {
+        Path tempDir = createTempDir();
+        ShardId shardId = new ShardId("test", "test", 0);
+        ClosedChunkIndexManager closedChunkIndexManager = new ClosedChunkIndexManager(
+            tempDir,
+            new InMemoryMetadataStore(),
+            new NOOPRetention(),
+            new NoopCompaction(),
+            threadPool,
+            shardId,
+            defaultSettings
+        );
+        Head head = new Head(tempDir, shardId, closedChunkIndexManager, defaultSettings);
+
+        // Create appender but don't call preprocess (series will be null)
+        Head.HeadAppender appender = head.newAppender();
+
+        boolean[] successCalled = { false };
+        boolean[] failureCalled = { false };
+
+        // Call append without preprocess - should detect null series and call failureCallback
+        assertThrows(RuntimeException.class, () -> appender.append(() -> successCalled[0] = true, () -> failureCalled[0] = true));
+
+        assertFalse("Success callback should not be called", successCalled[0]);
+        assertTrue("Failure callback should be called for null series", failureCalled[0]);
+
+        head.close();
+        closedChunkIndexManager.close();
+    }
+
+    public void testTranslogWriteFailure() throws IOException, InterruptedException {
+        Path tempDir = createTempDir();
+        ShardId shardId = new ShardId("test", "test", 0);
+        ClosedChunkIndexManager closedChunkIndexManager = new ClosedChunkIndexManager(
+            tempDir,
+            new InMemoryMetadataStore(),
+            new NOOPRetention(),
+            new NoopCompaction(),
+            threadPool,
+            shardId,
+            defaultSettings
+        );
+        Head head = new Head(tempDir, shardId, closedChunkIndexManager, defaultSettings);
+
+        // Create series successfully
+        Labels labels = ByteLabels.fromStrings("__name__", "test_metric", "host", "server1");
+        long hash = labels.stableHash();
+
+        Head.HeadAppender appender = head.newAppender();
+        boolean created = appender.preprocess(0, hash, labels, 2000L, 100.0, () -> {});
+        assertTrue("Should create series", created);
+
+        // Simulate callback failure - success callback throws exception
+        boolean[] failureCalled = { false };
+        boolean[] successCalled = { false };
+
+        MemSeries series = head.getSeriesMap().getByReference(hash);
+        RuntimeException ex = assertThrows(RuntimeException.class, () -> appender.append(() -> {
+            successCalled[0] = true;
+            throw new RuntimeException("Simulated callback failure");
+        }, () -> failureCalled[0] = true));
+        assertTrue("Exception should mention callback failure", ex.getMessage().contains("Simulated callback failure"));
+
+        assertTrue("Success callback should be called before throwing", successCalled[0]);
+        assertTrue("Failure callback should be called when callback fails", failureCalled[0]);
+
+        assertTrue("Series should be marked as failed after callback exception", series.isFailed());
+        assertNull("Series should not exist", head.getSeriesMap().getByReference(hash));
+
+        head.close();
+        closedChunkIndexManager.close();
+    }
+
+    public void testAppendDetectsFailedSeries() throws IOException, InterruptedException {
+        Path tempDir = createTempDir();
+        ShardId shardId = new ShardId("test", "test", 0);
+        ClosedChunkIndexManager closedChunkIndexManager = new ClosedChunkIndexManager(
+            tempDir,
+            new InMemoryMetadataStore(),
+            new NOOPRetention(),
+            new NoopCompaction(),
+            threadPool,
+            shardId,
+            defaultSettings
+        );
+        Head head = new Head(tempDir, shardId, closedChunkIndexManager, defaultSettings);
+
+        Labels labels = ByteLabels.fromStrings("__name__", "test_metric", "host", "server1");
+        long hash = labels.stableHash();
+
+        // 1. Successfully preprocess and append first sample
+        Head.HeadAppender appender1 = head.newAppender();
+        boolean created1 = appender1.preprocess(0, hash, labels, 2000L, 100.0, () -> {});
+        assertTrue("First appender should create series", created1);
+        appender1.append(() -> {}, () -> {});
+
+        // 2. For same series, preprocess next sample
+        Head.HeadAppender appender2 = head.newAppender();
+        boolean created2 = appender2.preprocess(1, hash, labels, 3000L, 200.0, () -> {});
+        assertFalse("Second appender should not create series", created2);
+
+        // 3. Before append, set series to failed
+        MemSeries series = head.getSeriesMap().getByReference(hash);
+        series.markFailed();
+
+        // 4. Call append and expect failure callback to be called
+        boolean[] successCalled = { false };
+        boolean[] failureCalled = { false };
+
+        assertThrows(RuntimeException.class, () -> appender2.append(() -> successCalled[0] = true, () -> failureCalled[0] = true));
+
+        assertFalse("Success callback should not be called for failed series", successCalled[0]);
+        assertTrue("Failure callback should be called for failed series", failureCalled[0]);
+
+        head.close();
+        closedChunkIndexManager.close();
+    }
+
+    /**
+     * Test that a failed series gets replaced with a new series on retry.
+     */
+    public void testFailedSeriesGetsReplacedOnRetry() throws IOException, InterruptedException {
+        Path tempDir = createTempDir();
+        ShardId shardId = new ShardId("test", "test", 0);
+        ClosedChunkIndexManager closedChunkIndexManager = new ClosedChunkIndexManager(
+            tempDir,
+            new InMemoryMetadataStore(),
+            new NOOPRetention(),
+            new NoopCompaction(),
+            threadPool,
+            shardId,
+            defaultSettings
+        );
+        Head head = new Head(tempDir, shardId, closedChunkIndexManager, defaultSettings);
+
+        Labels labels = ByteLabels.fromStrings("__name__", "test_metric", "host", "server1");
+        long hash = labels.stableHash();
+
+        // First attempt - create series and mark it as failed
+        Head.HeadAppender appender1 = head.newAppender();
+        appender1.preprocess(0, hash, labels, 1000L, 100.0, () -> {});
+
+        MemSeries series1 = head.getSeriesMap().getByReference(hash);
+        assertNotNull("First series should be created", series1);
+        head.markSeriesAsFailed(series1);
+
+        // Second attempt - should create a new series replacing the failed one
+        Head.HeadAppender appender2 = head.newAppender();
+        boolean created = appender2.preprocess(1, hash, labels, 2000L, 200.0, () -> {});
+
+        assertTrue("Second preprocess should create a new series", created);
+
+        MemSeries series2 = head.getSeriesMap().getByReference(hash);
+        assertNotNull("Series should exist after retry", series2);
+        assertFalse("New series should not be marked as failed", series2.isFailed());
+        assertNotSame("Should be a different series instance", series1, series2);
 
         head.close();
         closedChunkIndexManager.close();

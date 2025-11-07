@@ -62,8 +62,6 @@ public class TSDBStore extends SubdirectoryAwareStore {
         ShardPath shardPath,
         IndexStorePlugin.DirectoryFactory directoryFactory
     ) {
-        // FIXME: pass directoryFactory once latest store-subdirectory snapshot is available
-        super(shardId, indexSettings, directory, shardLock, onClose, shardPath);
-        // super(shardId, indexSettings, directory, shardLock, onClose, shardPath, directoryFactory);
+        super(shardId, indexSettings, directory, shardLock, onClose, shardPath, directoryFactory);
     }
 }
