@@ -91,6 +91,7 @@ public class TSDBPlugin extends Plugin implements SearchPlugin, EnginePlugin, Ac
     public static final Setting<TimeValue> TSDB_ENGINE_RETENTION_FREQUENCY = Setting.timeSetting(
         "index.tsdb_engine.retention.frequency",
         TimeValue.timeValueMinutes(15),
+        TimeValue.timeValueMinutes(1),
         Setting.Property.IndexScope,
         Setting.Property.Final
     );
@@ -105,13 +106,14 @@ public class TSDBPlugin extends Plugin implements SearchPlugin, EnginePlugin, Ac
     public static final Setting<TimeValue> TSDB_ENGINE_COMPACTION_FREQUENCY = Setting.timeSetting(
         "index.tsdb_engine.compaction.frequency",
         TimeValue.timeValueMinutes(15),
+        TimeValue.timeValueMinutes(1),
         Setting.Property.IndexScope,
         Setting.Property.Final
     );
 
     /**
      * Setting for the target number of samples to store in a single chunk.
-     *
+     * <p>
      * TODO: consume this setting in the TSDB engine implementation to allow changes to be picked up quickly.
      */
     public static final Setting<Integer> TSDB_ENGINE_SAMPLES_PER_CHUNK = Setting.intSetting(
@@ -125,7 +127,7 @@ public class TSDBPlugin extends Plugin implements SearchPlugin, EnginePlugin, Ac
     /**
      * Setting for the chunk expiry duration. Non-full chunks will be closed after this grace period if no new samples come in. May be
      * used to prevent sparse samples from each creating their own chunk.
-     *
+     * <p>
      * TODO: consume this setting in the TSDB engine implementation to allow changes to be picked up quickly.
      */
     public static final Setting<TimeValue> TSDB_ENGINE_CHUNK_EXPIRY = Setting.positiveTimeSetting(

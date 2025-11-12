@@ -13,11 +13,12 @@ import org.opensearch.index.IndexSettings;
 import org.opensearch.test.OpenSearchTestCase;
 import org.opensearch.tsdb.TSDBPlugin;
 
+import java.time.Duration;
+
 public class CompactionFactoryTests extends OpenSearchTestCase {
 
     /**
      * Test create with SizeTieredCompaction type and short retention time (10 hours)
-     * Expected ranges: [2, 6] (18, 54, 162, 486 filtered out as they exceed 0.1 * 10 = 1 hour)
      */
     public void testCreateSizeTieredCompactionWithShortRetentionTime() {
         Settings settings = Settings.builder()
@@ -32,8 +33,10 @@ public class CompactionFactoryTests extends OpenSearchTestCase {
         );
 
         Compaction compaction = CompactionFactory.create(indexSettings);
-        assertNotNull(compaction);
         assertTrue(compaction instanceof SizeTieredCompaction);
+        assertEquals(Duration.ofMinutes(15).toMillis(), compaction.getFrequency());
+        assertArrayEquals(new Duration[] {}, ((SizeTieredCompaction) compaction).getTiers());
+        assertNotNull(compaction);
     }
 
     /**
@@ -53,13 +56,15 @@ public class CompactionFactoryTests extends OpenSearchTestCase {
         );
 
         Compaction compaction = CompactionFactory.create(indexSettings);
-        assertNotNull(compaction);
         assertTrue(compaction instanceof SizeTieredCompaction);
+        assertEquals(Duration.ofMinutes(15).toMillis(), compaction.getFrequency());
+        assertArrayEquals(new Duration[] { Duration.ofHours(2), Duration.ofHours(6) }, ((SizeTieredCompaction) compaction).getTiers());
+        assertNotNull(compaction);
     }
 
     /**
      * Test create with SizeTieredCompaction type and long retention time (100 days)
-     * Expected ranges: [2, 6, 18, 54, 162, 486] (all included, capped at 744 hours = 31 days)
+     * Expected ranges: [2, 6, 18, 54, 162]
      */
     public void testCreateSizeTieredCompactionWithLongRetentionTime() {
         Settings settings = Settings.builder()
@@ -74,8 +79,16 @@ public class CompactionFactoryTests extends OpenSearchTestCase {
         );
 
         Compaction compaction = CompactionFactory.create(indexSettings);
-        assertNotNull(compaction);
         assertTrue(compaction instanceof SizeTieredCompaction);
+        assertEquals(Duration.ofMinutes(15).toMillis(), compaction.getFrequency());
+        var expectedTiers = new Duration[] {
+            Duration.ofHours(2),
+            Duration.ofHours(6),
+            Duration.ofHours(18),
+            Duration.ofHours(54),
+            Duration.ofHours(162) };
+        assertArrayEquals(expectedTiers, ((SizeTieredCompaction) compaction).getTiers());
+        assertNotNull(compaction);
     }
 
     /**
@@ -95,9 +108,18 @@ public class CompactionFactoryTests extends OpenSearchTestCase {
         );
 
         Compaction compaction = CompactionFactory.create(indexSettings);
-        assertNotNull(compaction);
         assertTrue(compaction instanceof SizeTieredCompaction);
-        // Max should be capped at min(365 * 24 * 0.1, 744) = 744
+        assertEquals(Duration.ofMinutes(15).toMillis(), compaction.getFrequency());
+        var expectedTiers = new Duration[] {
+            Duration.ofHours(2),
+            Duration.ofHours(6),
+            Duration.ofHours(18),
+            Duration.ofHours(54),
+            Duration.ofHours(162),
+            Duration.ofHours(486),
+            Duration.ofHours(744) };
+        assertArrayEquals(expectedTiers, ((SizeTieredCompaction) compaction).getTiers());
+        assertNotNull(compaction);
     }
 
     /**
@@ -117,9 +139,10 @@ public class CompactionFactoryTests extends OpenSearchTestCase {
         );
 
         Compaction compaction = CompactionFactory.create(indexSettings);
-        assertNotNull(compaction);
         assertTrue(compaction instanceof SizeTieredCompaction);
-        // 0.1 * 1 hour = 0.1, so all ranges >= 2 would be filtered out
+        assertEquals(Duration.ofMinutes(15).toMillis(), compaction.getFrequency());
+        assertArrayEquals(new Duration[] {}, ((SizeTieredCompaction) compaction).getTiers());
+        assertNotNull(compaction);
     }
 
     /**
@@ -137,9 +160,11 @@ public class CompactionFactoryTests extends OpenSearchTestCase {
         );
 
         Compaction compaction = CompactionFactory.create(indexSettings);
-        assertNotNull(compaction);
-        // Default is SizeTieredCompaction
         assertTrue(compaction instanceof SizeTieredCompaction);
+        assertEquals(Duration.ofMinutes(15).toMillis(), compaction.getFrequency());
+        var expectedTiers = new Duration[] { Duration.ofHours(2), Duration.ofHours(6), };
+        assertArrayEquals(expectedTiers, ((SizeTieredCompaction) compaction).getTiers());
+        assertNotNull(compaction);
     }
 
     /**
@@ -199,6 +224,28 @@ public class CompactionFactoryTests extends OpenSearchTestCase {
     }
 
     /**
+     * Test create with empty compaction type string defaults to NoopCompaction
+     */
+    public void testInvalidFrequencyThrowsException() {
+        Settings settings = Settings.builder()
+            .put(IndexMetadata.SETTING_VERSION_CREATED, org.opensearch.Version.CURRENT)
+            .put(TSDBPlugin.TSDB_ENGINE_COMPACTION_FREQUENCY.getKey(), "30s")
+            .put(TSDBPlugin.TSDB_ENGINE_RETENTION_TIME.getKey(), "7d")
+            .build();
+
+        IndexSettings indexSettings = new IndexSettings(
+            IndexMetadata.builder("test-index").settings(settings).numberOfShards(1).numberOfReplicas(0).build(),
+            Settings.EMPTY
+        );
+
+        IllegalArgumentException exception = expectThrows(IllegalArgumentException.class, () -> CompactionFactory.create(indexSettings));
+        assertEquals(
+            "failed to parse value [30s] for setting [index.tsdb_engine.compaction.frequency], must be >= [1m]",
+            exception.getMessage()
+        );
+    }
+
+    /**
      * Test create with SizeTieredCompaction and 30 day retention time (edge case at cap boundary)
      * 30 days = 720 hours, 0.1 * 720 = 72 hours, so ranges [2, 6, 18, 54] should pass
      */
@@ -215,6 +262,7 @@ public class CompactionFactoryTests extends OpenSearchTestCase {
         );
 
         Compaction compaction = CompactionFactory.create(indexSettings);
+        assertEquals(Duration.ofMinutes(15).toMillis(), compaction.getFrequency());
         assertNotNull(compaction);
         assertTrue(compaction instanceof SizeTieredCompaction);
     }
@@ -223,11 +271,12 @@ public class CompactionFactoryTests extends OpenSearchTestCase {
      * Test create with SizeTieredCompaction and 200 hour retention time
      * 0.1 * 200 = 20 hours, so ranges [2, 6, 18] should pass
      */
-    public void testCreateSizeTieredCompactionWithCustomHourRetentionTime() {
+    public void testCreateSizeTieredCompactionWithCustomHourRetentionTimeAndFrequency() {
         Settings settings = Settings.builder()
             .put(IndexMetadata.SETTING_VERSION_CREATED, org.opensearch.Version.CURRENT)
             .put(TSDBPlugin.TSDB_ENGINE_COMPACTION_TYPE.getKey(), "SizeTieredCompaction")
             .put(TSDBPlugin.TSDB_ENGINE_RETENTION_TIME.getKey(), "200h")
+            .put(TSDBPlugin.TSDB_ENGINE_COMPACTION_FREQUENCY.getKey(), "2m")
             .build();
 
         IndexSettings indexSettings = new IndexSettings(
@@ -236,7 +285,10 @@ public class CompactionFactoryTests extends OpenSearchTestCase {
         );
 
         Compaction compaction = CompactionFactory.create(indexSettings);
-        assertNotNull(compaction);
         assertTrue(compaction instanceof SizeTieredCompaction);
+        assertEquals(Duration.ofMinutes(2).toMillis(), compaction.getFrequency());
+        var expectedTiers = new Duration[] { Duration.ofHours(2), Duration.ofHours(6), Duration.ofHours(18), };
+        assertArrayEquals(expectedTiers, ((SizeTieredCompaction) compaction).getTiers());
+        assertNotNull(compaction);
     }
 }

@@ -139,6 +139,25 @@ public class RetentionFactoryTests extends OpenSearchTestCase {
         assertEquals("Retention time/age must be greater than or equal to default block duration", exception.getMessage());
     }
 
+    public void testInvalidFrequencyThrowsException() {
+        Settings settings = Settings.builder()
+            .put(IndexMetadata.SETTING_VERSION_CREATED, org.opensearch.Version.CURRENT)
+            .put(TSDBPlugin.TSDB_ENGINE_RETENTION_FREQUENCY.getKey(), "30s")
+            .put(TSDBPlugin.TSDB_ENGINE_BLOCK_DURATION.getKey(), "10m")
+            .build();
+
+        IndexSettings indexSettings = new IndexSettings(
+            IndexMetadata.builder("test-index").settings(settings).numberOfShards(1).numberOfReplicas(0).build(),
+            Settings.EMPTY
+        );
+
+        IllegalArgumentException exception = expectThrows(IllegalArgumentException.class, () -> RetentionFactory.create(indexSettings));
+        assertEquals(
+            "failed to parse value [30s] for setting [index.tsdb_engine.retention.frequency], must be >= [1m]",
+            exception.getMessage()
+        );
+    }
+
     public void testUnsetRetentionTime() {
         Settings settings = Settings.builder()
             .put(IndexMetadata.SETTING_VERSION_CREATED, org.opensearch.Version.CURRENT)

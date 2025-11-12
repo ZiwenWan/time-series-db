@@ -29,7 +29,8 @@ public class CompactionFactory {
 
     public enum CompactionType {
         SizeTieredCompaction("SizeTieredCompaction"),
-        Noop("Noop");
+        Noop("Noop"),
+        Invalid("Invalid");
 
         public final String name;
 
@@ -41,7 +42,7 @@ public class CompactionFactory {
             return switch (compactionType) {
                 case "SizeTieredCompaction" -> CompactionType.SizeTieredCompaction;
                 case "Noop" -> CompactionType.Noop;
-                default -> throw new IllegalArgumentException("Unknown compaction type: " + compactionType);
+                default -> CompactionType.Invalid;
             };
         }
     }
@@ -58,15 +59,17 @@ public class CompactionFactory {
         switch (compactionType) {
             case SizeTieredCompaction:
                 var retentionTime = TSDBPlugin.TSDB_ENGINE_RETENTION_TIME.get(indexSettings.getSettings()).getHours();
-                var frequency = TSDBPlugin.TSDB_ENGINE_RETENTION_TIME.get(indexSettings.getSettings()).getHours();
-                var ttl = retentionTime != 0 ? retentionTime : Long.MAX_VALUE;
+                var frequency = TSDBPlugin.TSDB_ENGINE_COMPACTION_FREQUENCY.get(indexSettings.getSettings()).getMillis();
+                var ttl = retentionTime != -1 ? retentionTime : Long.MAX_VALUE;
                 var resolution = TimeUnit.valueOf(TSDBPlugin.TSDB_ENGINE_TIME_UNIT.get(indexSettings.getSettings()));
 
                 // Cap the max index size as minimum of 1/10 of TTL or 31D(744H).
                 List<Integer> tiers = new ArrayList<>();
-                for (int tier = 2; tier <= ttl * 0.1; tier *= 3) {
-                    if (tier > 744) {
-                        tiers.add(744);
+                for (int tier = 2;; tier *= 3) {
+                    if (tier > ttl * 0.1) {
+                        if (tier > 744) {
+                            tiers.add(744);
+                        }
                         break;
                     }
                     tiers.add(tier);

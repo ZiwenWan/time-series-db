@@ -46,9 +46,9 @@ public class SizeTieredCompaction implements Compaction {
     /**
      * Constructs a new size-tiered compaction strategy with the specified time ranges.
      *
-     * @param ranges array of time duration in ascending order (e.g., [2h, 6h, 18h, 54h, 162h, 486h]).
-     *               These represent the maximum duration in hours for each compaction tier.
-     * @param interval scheduling interval between the consecutive compactions.
+     * @param ranges     array of time duration in ascending order (e.g., [2h, 6h, 18h, 54h, 162h, 486h]).
+     *                   These represent the maximum duration in hours for each compaction tier.
+     * @param interval   scheduling interval between the consecutive compactions.
      * @param resolution resolution of the samples
      */
     public SizeTieredCompaction(Duration[] ranges, long interval, TimeUnit resolution) {
@@ -193,5 +193,14 @@ public class SizeTieredCompaction implements Compaction {
 
     public void setFrequency(long frequency) {
         this.interval = frequency;
+    }
+
+    /**
+     * Returns the configured tiers.
+     *
+     * @return an array of tier durations.
+     */
+    public Duration[] getTiers() {
+        return Arrays.stream(ranges).mapToObj(Duration::ofMillis).toArray(Duration[]::new);
     }
 }

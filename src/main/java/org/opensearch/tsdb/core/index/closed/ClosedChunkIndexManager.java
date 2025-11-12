@@ -141,7 +141,7 @@ public class ClosedChunkIndexManager {
         openClosedChunkIndexes(this.dir);
         mgmtTaskScheduler = threadPool.scheduleWithFixedDelay(
             this::runOptimization,
-            TimeValue.timeValueMinutes(5),
+            TimeValue.timeValueMinutes(1),
             TSDBPlugin.MGMT_THREAD_POOL_NAME
         );
 
