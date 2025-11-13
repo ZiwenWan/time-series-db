@@ -321,4 +321,142 @@ public class ResolvedPartitionsTests extends OpenSearchTestCase {
             assertTrue(resolvedPartitions.getPartitions().isEmpty());
         }
     }
+
+    /**
+     * Test parsing partition windows with nil/missing end timestamp.
+     */
+    public void testParsePartitionWindowsWithMissingEndTimestamp() throws IOException {
+        String json = """
+            {
+              "partitions": [
+                {
+                  "fetch_statement": "fetch service:k8s-resource-controller",
+                  "partition_windows": [
+                    {
+                      "partition_id": "cluster1:index-2d",
+                      "start": 1731003630000,
+                      "end": 1731010000000,
+                      "routing_keys": [
+                        {"key": "region", "value": "dca"}
+                      ]
+                    },
+                    {
+                      "partition_id": "cluster2:index-2d",
+                      "start": 1731005000000,
+                      "routing_keys": [
+                        {"key": "region", "value": "dca"}
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+            """;
+
+        // Use a fixed time supplier for deterministic test behavior
+        long fixedNowMs = 1731007000000L;
+
+        try (XContentParser parser = createParser(JsonXContent.jsonXContent, json)) {
+            ResolvedPartitions resolvedPartitions = ResolvedPartitions.parse(parser, () -> fixedNowMs);
+
+            assertNotNull(resolvedPartitions);
+            assertEquals(1, resolvedPartitions.getPartitions().size());
+
+            ResolvedPartition partition = resolvedPartitions.getPartitions().get(0);
+            assertEquals("fetch service:k8s-resource-controller", partition.getFetchStatement());
+            assertEquals(2, partition.getPartitionWindows().size());
+
+            // First window: has explicit end timestamp
+            PartitionWindow window1 = partition.getPartitionWindows().get(0);
+            assertEquals("cluster1:index-2d", window1.partitionId());
+            assertEquals(1731003630000L, window1.startMs());
+            assertEquals(1731010000000L, window1.endMs()); // Explicit end value
+            assertEquals(1, window1.routingKeys().size());
+
+            // Second window: missing end field, should default to nowMs (our fixed time)
+            PartitionWindow window2 = partition.getPartitionWindows().get(1);
+            assertEquals("cluster2:index-2d", window2.partitionId());
+            assertEquals(1731005000000L, window2.startMs());
+            assertEquals(fixedNowMs, window2.endMs()); // Should equal our fixed time
+            assertEquals(1, window2.routingKeys().size());
+
+            assertTrue("There should be collision", resolvedPartitions.hasOverlappingPartitions());
+        }
+    }
+
+    /**
+     * Test parsing multiple fetch statements where all partition windows have missing end timestamp.
+     */
+    public void testMultipleFetchStatementsWithMissingEndTimestamps() throws IOException {
+        String json = """
+            {
+              "partitions": [
+                {
+                  "fetch_statement": "fetch name:quota_status.requests.memory resources-type:total",
+                  "partition_windows": [
+                    {
+                      "partition_id": "cluster1:opensearch-ts-poc-2-staging-data-dca-tc:2d",
+                      "start": 1731003630000,
+                      "routing_keys": [
+                        {"key": "region", "value": "dca"},
+                        {"key": "namespace", "value": "benchmark"}
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "fetch_statement": "fetch name:quota_status.requests.memory resources-type:used",
+                  "partition_windows": [
+                    {
+                      "partition_id": "cluster1:opensearch-ts-poc-2-staging-data-dca-tc:2d",
+                      "start": 1731003630000,
+                      "routing_keys": [
+                        {"key": "region", "value": "dca"},
+                        {"key": "namespace", "value": "benchmark"}
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+            """;
+
+        // Use a fixed time supplier for deterministic test behavior
+        long fixedNowMs = 1731010000000L;
+
+        try (XContentParser parser = createParser(JsonXContent.jsonXContent, json)) {
+            ResolvedPartitions resolvedPartitions = ResolvedPartitions.parse(parser, () -> fixedNowMs);
+
+            assertNotNull(resolvedPartitions);
+            assertEquals(2, resolvedPartitions.getPartitions().size());
+
+            // First fetch statement
+            ResolvedPartition partition1 = resolvedPartitions.getPartitions().get(0);
+            assertEquals("fetch name:quota_status.requests.memory resources-type:total", partition1.getFetchStatement());
+            assertEquals(1, partition1.getPartitionWindows().size());
+
+            PartitionWindow window1 = partition1.getPartitionWindows().get(0);
+            assertEquals("cluster1:opensearch-ts-poc-2-staging-data-dca-tc:2d", window1.partitionId());
+            assertEquals(1731003630000L, window1.startMs());
+            assertEquals(fixedNowMs, window1.endMs()); // Should equal our fixed time
+            assertEquals(2, window1.routingKeys().size());
+
+            // Second fetch statement
+            ResolvedPartition partition2 = resolvedPartitions.getPartitions().get(1);
+            assertEquals("fetch name:quota_status.requests.memory resources-type:used", partition2.getFetchStatement());
+            assertEquals(1, partition2.getPartitionWindows().size());
+
+            PartitionWindow window2 = partition2.getPartitionWindows().get(0);
+            assertEquals("cluster1:opensearch-ts-poc-2-staging-data-dca-tc:2d", window2.partitionId());
+            assertEquals(1731003630000L, window2.startMs());
+            assertEquals(fixedNowMs, window2.endMs()); // Should equal our fixed time
+            assertEquals(2, window2.routingKeys().size());
+
+            // Verify both windows use the same reference time (nowMs)
+            // They should have the exact same end timestamp since nowMs is captured once
+            assertEquals("Both partition windows should use the same nowMs reference time", window1.endMs(), window2.endMs());
+
+            assertFalse("There should be no collision", resolvedPartitions.hasOverlappingPartitions());
+        }
+    }
 }

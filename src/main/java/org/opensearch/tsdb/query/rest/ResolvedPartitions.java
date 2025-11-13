@@ -17,6 +17,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.LongSupplier;
 
 /**
  * Represents resolved partitions for a federated M3QL query.
@@ -55,13 +56,30 @@ public class ResolvedPartitions implements FederationMetadata {
     }
 
     /**
-     * Parses ResolvedPartitions from XContent.
+     * Parses ResolvedPartitions from XContent using current system time in milliseconds for missing end timestamps.
      *
      * @param parser the XContent parser positioned at the resolved_partitions object
      * @return parsed ResolvedPartitions instance
      * @throws IOException if parsing fails
      */
     public static ResolvedPartitions parse(XContentParser parser) throws IOException {
+        return parse(parser, System::currentTimeMillis);
+    }
+
+    /**
+     * Parses ResolvedPartitions from XContent with injectable time supplier.
+     *
+     * <p>This overload allows tests to inject a fixed time supplier for deterministic behavior,
+     * avoiding test flakiness from non-monotonic system clock changes.</p>
+     *
+     * @param parser the XContent parser positioned at the resolved_partitions object
+     * @param timeSupplier supplier for current time in milliseconds (used for missing end timestamps)
+     * @return parsed ResolvedPartitions instance
+     * @throws IOException if parsing fails
+     */
+    public static ResolvedPartitions parse(XContentParser parser, LongSupplier timeSupplier) throws IOException {
+        long nowMs = timeSupplier.getAsLong();
+
         List<ResolvedPartition> partitions = new ArrayList<>();
 
         XContentParser.Token token;
@@ -72,7 +90,7 @@ public class ResolvedPartitions implements FederationMetadata {
                 currentFieldName = parser.currentName();
             } else if (token == XContentParser.Token.START_ARRAY && FIELD_PARTITIONS.equals(currentFieldName)) {
                 while (parser.nextToken() != XContentParser.Token.END_ARRAY) {
-                    partitions.add(ResolvedPartition.parse(parser));
+                    partitions.add(ResolvedPartition.parse(parser, nowMs));
                 }
             }
         }
@@ -250,8 +268,13 @@ public class ResolvedPartitions implements FederationMetadata {
 
         /**
          * Parses ResolvedPartition from XContent.
+         *
+         * @param parser the XContent parser
+         * @param nowMs reference time in milliseconds for nil/missing end timestamps
+         * @return parsed ResolvedPartition instance
+         * @throws IOException if parsing fails
          */
-        public static ResolvedPartition parse(XContentParser parser) throws IOException {
+        public static ResolvedPartition parse(XContentParser parser, long nowMs) throws IOException {
             String fetchStatement = null;
             List<PartitionWindow> partitionWindows = new ArrayList<>();
 
@@ -265,7 +288,7 @@ public class ResolvedPartitions implements FederationMetadata {
                     fetchStatement = parser.text();
                 } else if (token == XContentParser.Token.START_ARRAY && FIELD_PARTITION_WINDOWS.equals(currentFieldName)) {
                     while (parser.nextToken() != XContentParser.Token.END_ARRAY) {
-                        partitionWindows.add(PartitionWindow.parse(parser));
+                        partitionWindows.add(PartitionWindow.parse(parser, nowMs));
                     }
                 }
             }
@@ -299,11 +322,16 @@ public class ResolvedPartitions implements FederationMetadata {
 
         /**
          * Parses PartitionWindow from XContent.
+         *
+         * @param parser the XContent parser
+         * @param nowMs reference time in milliseconds for nil/missing end timestamps
+         * @return parsed PartitionWindow instance
+         * @throws IOException if parsing fails
          */
-        public static PartitionWindow parse(XContentParser parser) throws IOException {
+        public static PartitionWindow parse(XContentParser parser, long nowMs) throws IOException {
             String partitionId = null;
             long startMs = 0;
-            long endMs = 0;
+            long endMs = nowMs;
             List<RoutingKey> routingKeys = new ArrayList<>();
 
             XContentParser.Token token;
