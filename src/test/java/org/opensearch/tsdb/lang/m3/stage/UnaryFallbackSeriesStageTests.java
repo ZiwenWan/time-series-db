@@ -68,6 +68,8 @@ public class UnaryFallbackSeriesStageTests extends AbstractWireSerializingTestCa
         // maxTimestamp in TimeSeries is the last sample timestamp (20), not the exclusive upper bound (30)
         assertEquals(20L, constantSeries.getMaxTimestamp());
         assertEquals(step, constantSeries.getStep());
+        // Verify alias is formatted with 3 decimal places
+        assertEquals("2.500", constantSeries.getAlias());
 
         // Verify samples are generated correctly (maxTimestamp is exclusive, so no sample at 30)
         List<Sample> expectedSamples = List.of(
@@ -126,6 +128,8 @@ public class UnaryFallbackSeriesStageTests extends AbstractWireSerializingTestCa
         assertEquals(1, result.size());
         TimeSeries constantSeries = result.get(0);
         assertEquals(0.0, ((FloatSample) constantSeries.getSamples().get(0)).getValue(), 0.001);
+        // Verify alias formatting: 0 -> "0.000"
+        assertEquals("0.000", constantSeries.getAlias());
     }
 
     /**

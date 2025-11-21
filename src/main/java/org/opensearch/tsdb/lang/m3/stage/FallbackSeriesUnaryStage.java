@@ -21,7 +21,10 @@ import org.opensearch.tsdb.query.stage.UnaryPipelineStage;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.text.DecimalFormat;
+import java.text.DecimalFormatSymbols;
 
 /**
  * FallbackSeriesUnaryStage returns its input series if it is not empty,
@@ -42,6 +45,11 @@ public class FallbackSeriesUnaryStage implements UnaryPipelineStage {
     private final long minTimestamp;
     private final long maxTimestamp;
     private final long step;
+
+    // ThreadLocal to ensure thread-safety for DecimalFormat in query hotpath
+    private static final ThreadLocal<DecimalFormat> FALLBACK_ALIAS_FORMAT = ThreadLocal.withInitial(
+        () -> new DecimalFormat("0.000", DecimalFormatSymbols.getInstance(Locale.ROOT))
+    );
 
     /**
      * Constructor for FallbackSeriesUnaryStage.
@@ -112,7 +120,9 @@ public class FallbackSeriesUnaryStage implements UnaryPipelineStage {
         // Since maxTimestamp is exclusive, the last sample is the largest minTimestamp + N*step < maxTimestamp
         long lastSampleTimestamp = TimeSeries.calculateAlignedMaxTimestamp(minTimestamp, maxTimestamp, step);
 
-        return List.of(new TimeSeries(samples, labels, minTimestamp, lastSampleTimestamp, step, null));
+        // Format alias as 3 decimal places (e.g., 0 -> "0.000", 0.5135 -> "0.514")
+        String alias = FALLBACK_ALIAS_FORMAT.get().format(fallbackValue);
+        return List.of(new TimeSeries(samples, labels, minTimestamp, lastSampleTimestamp, step, alias));
     }
 
     /**
