@@ -50,6 +50,7 @@ import org.opensearch.threadpool.ExecutorBuilder;
 import org.opensearch.threadpool.FixedExecutorBuilder;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.tsdb.metrics.TSDBMetrics;
+import org.opensearch.tsdb.query.search.TimeRangePruningQueryBuilder;
 import org.opensearch.tsdb.query.aggregator.InternalTimeSeries;
 import org.opensearch.tsdb.query.aggregator.TimeSeriesCoordinatorAggregationBuilder;
 import org.opensearch.tsdb.query.aggregator.TimeSeriesUnfoldAggregationBuilder;
@@ -363,6 +364,17 @@ public class TSDBPlugin extends Plugin implements SearchPlugin, EnginePlugin, Ac
                 TimeSeriesCoordinatorAggregationBuilder::new,
                 TimeSeriesCoordinatorAggregationBuilder::parse
             ).addResultReader(InternalTimeSeries::new)
+        );
+    }
+
+    @Override
+    public List<QuerySpec<?>> getQueries() {
+        return List.of(
+            new QuerySpec<>(
+                TimeRangePruningQueryBuilder.NAME,
+                TimeRangePruningQueryBuilder::new,
+                TimeRangePruningQueryBuilder::fromXContent
+            )
         );
     }
 

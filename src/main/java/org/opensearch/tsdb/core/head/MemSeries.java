@@ -144,13 +144,15 @@ public class MemSeries {
 
             MemChunk chunk = this.headChunk;
             if (chunk == null) {
-                return new ClosableChunkResult(Collections.emptyList(), Long.MAX_VALUE); // nothing to map, no samples in memory
+                // nothing to map, no samples in memory
+                return new ClosableChunkResult(Collections.emptyList(), Long.MAX_VALUE, Long.MAX_VALUE);
             }
 
             // it is exceedingly rare to have more than 2 closable chunks, so we optimize for the common case
             List<MemChunk> closableChunks = new ArrayList<>(2);
 
             long minSeqNo = Long.MAX_VALUE;
+            long minTimestamp = Long.MAX_VALUE;
             while (chunk != null) {
                 if (chunk.getMaxTimestamp() <= cutoffTimestamp) {
                     closableChunks.addFirst(chunk);
@@ -158,11 +160,12 @@ public class MemSeries {
                     TSDBMetrics.incrementCounter(TSDBMetrics.ENGINE.memChunksExpiredTotal, 1);
                 } else {
                     minSeqNo = Math.min(minSeqNo, chunk.getMinSeqNo());
+                    minTimestamp = Math.min(minTimestamp, chunk.getMinTimestamp());
                 }
                 chunk = chunk.getPrev();
             }
 
-            return new ClosableChunkResult(closableChunks, minSeqNo);
+            return new ClosableChunkResult(closableChunks, minSeqNo, minTimestamp);
         } finally {
             unlock();
         }
@@ -172,9 +175,10 @@ public class MemSeries {
      * Result of identifying chunks that can be closed.
      *
      * @param closableChunks list of chunks that are ready to be closed and compressed
-     * @param minSeqNo       the minimum sequence number among the closable chunks
+     * @param minSeqNo       the minimum sequence number of the non-closable chunks
+     * @param minTimestamp   the minimum timestamp of the non-closable chunks
      */
-    public record ClosableChunkResult(List<MemChunk> closableChunks, long minSeqNo) {
+    public record ClosableChunkResult(List<MemChunk> closableChunks, long minSeqNo, long minTimestamp) {
     }
 
     /**

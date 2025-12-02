@@ -7,6 +7,7 @@
  */
 package org.opensearch.tsdb.core.reader;
 
+import org.apache.lucene.index.FilterLeafReader;
 import org.apache.lucene.index.LeafReader;
 import org.opensearch.common.lucene.index.SequentialStoredFieldsLeafReader;
 import org.opensearch.tsdb.core.chunk.ChunkIterator;
@@ -23,13 +24,37 @@ import java.util.List;
 public abstract class TSDBLeafReader extends SequentialStoredFieldsLeafReader {
 
     /**
+     * Minimum timestamp of the index containing this leaf, not necessarily equal to the minimum timestamp of the leaf
+     */
+    private final long minIndexTimestamp;
+
+    /**
+     * Maximum timestamp of the index containing this leaf, not necessarily equal to the maximum timestamp of the leaf
+     */
+    private final long maxIndexTimestamp;
+
+    /**
      * <p>Construct a StoredFieldsFilterLeafReader based on the specified base reader.
      * <p>Note that base reader is closed if this FilterLeafReader is closed.</p>
      *
      *  @param in :  specified base reader.
      */
     public TSDBLeafReader(LeafReader in) {
+        this(in, Long.MIN_VALUE, Long.MAX_VALUE);
+    }
+
+    /**
+     * <p>Construct a TSDBLeafReader with time bounds metadata.
+     * <p>Note that base reader is closed if this FilterLeafReader is closed.</p>
+     *
+     * @param in specified base reader
+     * @param minIndexTimestamp minimum timestamp in this leaf (inclusive)
+     * @param maxIndexTimestamp maximum timestamp in this leaf (inclusive)
+     */
+    public TSDBLeafReader(LeafReader in, long minIndexTimestamp, long maxIndexTimestamp) {
         super(in);
+        this.minIndexTimestamp = minIndexTimestamp;
+        this.maxIndexTimestamp = maxIndexTimestamp;
     }
 
     /**
@@ -63,4 +88,52 @@ public abstract class TSDBLeafReader extends SequentialStoredFieldsLeafReader {
      */
     public abstract Labels labelsForDoc(int docId, TSDBDocValues tsdbDocValues) throws IOException;
 
+    /**
+     * Gets the minimum timestamp for data in this leaf reader.
+     * @return minimum timestamp (inclusive)
+     */
+    public long getMinIndexTimestamp() {
+        return minIndexTimestamp;
+    }
+
+    /**
+     * Gets the maximum timestamp for data in this leaf reader.
+     * @return maximum timestamp (inclusive)
+     */
+    public long getMaxIndexTimestamp() {
+        return maxIndexTimestamp;
+    }
+
+    /**
+     * Checks if this leaf overlaps with a given time range.
+     * Uses the semantics: [queryStart, queryEnd) - start inclusive, end exclusive
+     *
+     * @param queryStartMs query time range start (inclusive) in milliseconds
+     * @param queryEndMs query time range end (exclusive) in milliseconds
+     * @return true if this leaf overlaps with the query range
+     */
+    public boolean overlapsTimeRange(long queryStartMs, long queryEndMs) {
+        if (queryStartMs >= queryEndMs) {
+            return false;
+        }
+        return minIndexTimestamp < queryEndMs && maxIndexTimestamp >= queryStartMs;
+    }
+
+    /**
+     * Unwraps FilterLeafReaders to find the underlying TSDBLeafReader.
+     * <p>
+     * Lucene often wraps leaf readers in filter readers for various purposes.
+     * We need to unwrap them to access the TSDBLeafReader
+     *
+     * @param reader the leaf reader to unwrap
+     * @return the underlying TSDBLeafReader, or null if not found
+     */
+    public static TSDBLeafReader unwrapLeafReader(LeafReader reader) {
+        if (reader instanceof TSDBLeafReader tsdbLeafReader) {
+            return tsdbLeafReader;
+        } else if (reader instanceof FilterLeafReader filterReader) {
+            return unwrapLeafReader(filterReader.getDelegate());
+        }
+        return null;
+    }
 }

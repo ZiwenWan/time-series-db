@@ -25,6 +25,7 @@ import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.LongSupplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -43,15 +44,17 @@ import java.util.stream.Stream;
 public class TSDBDirectoryReader extends DirectoryReader {
     private static final Logger log = LogManager.getLogger(TSDBDirectoryReader.class);
     private final DirectoryReader liveSeriesIndexDirectoryReader;
-    private final List<DirectoryReader> closedChunkIndexDirectoryReaders;
+    private final LongSupplier minLiveTimestampSupplier;
+    private final List<DirectoryReaderWithMetadata> closedChunkIndexReadersWithMetadata;
     private final MemChunkReader memChunkReader;
     private final LabelStorageType labelStorageType;
     private final long version;
 
     /**
-     * Constructs a TSDBDirectoryReader that combines a live series index reader
-     * @param liveReader the DirectoryReader for the live series index
-     * @param closedChunkIndexReaders list of DirectoryReaders for closed chunk indices
+     * Constructs a TSDBDirectoryReader that combines a live series index reader with metadata for pruning
+     * @param liveReader the DirectoryReaderWithMetadata for the live series index
+     * @param minLiveTimestampSupplier supplies the current minimum possible timestamp of an in-memory sample
+     * @param closedChunkIndexReadersWithMetadata list of DirectoryReaderWithMetadata for closed chunk indices
      * @param memChunkReader reader to read MemChunk from reference, this is needed for LiveSeriesIndexLeafReader
      * @param labelStorageType the storage type configured for labels
      * @param version the version of this reader instance. Version will be increased by 1 for each refresh
@@ -59,7 +62,8 @@ public class TSDBDirectoryReader extends DirectoryReader {
      */
     public TSDBDirectoryReader(
         DirectoryReader liveReader,
-        List<DirectoryReader> closedChunkIndexReaders,
+        LongSupplier minLiveTimestampSupplier,
+        List<DirectoryReaderWithMetadata> closedChunkIndexReadersWithMetadata,
         MemChunkReader memChunkReader,
         LabelStorageType labelStorageType,
         long version
@@ -70,55 +74,51 @@ public class TSDBDirectoryReader extends DirectoryReader {
         // TODO : Should the leaves be sorted in any order?
         super(
             new CompositeDirectory(
-                Stream.concat(Stream.of(liveReader.directory()), closedChunkIndexReaders.stream().map(DirectoryReader::directory))
-                    .collect(Collectors.toList())
+                Stream.concat(
+                    Stream.of(liveReader.directory()),
+                    closedChunkIndexReadersWithMetadata.stream().map(rwm -> rwm.reader().directory())
+                ).collect(Collectors.toList())
             ),
-            buildCombinedLeaves(liveReader, closedChunkIndexReaders, memChunkReader, labelStorageType),
+            buildCombinedLeaves(
+                liveReader,
+                minLiveTimestampSupplier.getAsLong(),
+                closedChunkIndexReadersWithMetadata,
+                memChunkReader,
+                labelStorageType
+            ),
             null
         );
 
         this.memChunkReader = memChunkReader;
         this.labelStorageType = labelStorageType;
-        // Store the readers and manager
+        // Store the readers and metadata
         this.liveSeriesIndexDirectoryReader = liveReader;
-        this.closedChunkIndexDirectoryReaders = new ArrayList<>(closedChunkIndexReaders);
+        this.minLiveTimestampSupplier = minLiveTimestampSupplier;
+        this.closedChunkIndexReadersWithMetadata = new ArrayList<>(closedChunkIndexReadersWithMetadata);
 
         // increment reference count of all sub readers by one
         this.liveSeriesIndexDirectoryReader.incRef();
-        for (DirectoryReader reader : this.closedChunkIndexDirectoryReaders) {
-            reader.incRef();
+        for (DirectoryReaderWithMetadata readerWithMetadata : this.closedChunkIndexReadersWithMetadata) {
+            readerWithMetadata.reader().incRef();
         }
         this.version = version;
     }
 
     /**
      * Constructs a TSDBDirectoryReader that combines a live series index reader
-     * @param liveReader the DirectoryReader for the live series index
-     * @param closedChunkIndexReaders list of DirectoryReaders for closed chunk indices
+     * @param liveReader the DirectoryReaderWithMetadata for the live series index
+     * @param minLiveTimestampSupplier supplies the current minimum possible timestamp of an in-memory sample
+     * @param closedChunkIndexReaders list of DirectoryReaderWithMetadata for closed chunk indices
      * @param memChunkReader reader to read MemChunk from reference, this is needed for LiveSeriesIndexLeafReader
-     * @param labelStorageType the storage type configured for labels
      * @throws IOException if an I/O error occurs during construction
      */
     public TSDBDirectoryReader(
         DirectoryReader liveReader,
-        List<DirectoryReader> closedChunkIndexReaders,
-        MemChunkReader memChunkReader,
-        LabelStorageType labelStorageType
+        LongSupplier minLiveTimestampSupplier,
+        List<DirectoryReaderWithMetadata> closedChunkIndexReaders,
+        MemChunkReader memChunkReader
     ) throws IOException {
-        this(liveReader, closedChunkIndexReaders, memChunkReader, labelStorageType, 0L);
-    }
-
-    /**
-     * Constructs a TSDBDirectoryReader with default label storage type (BINARY).
-     * Used by tests that don't specify a storage type.
-     * @param liveReader the DirectoryReader for the live series index
-     * @param closedChunkIndexReaders list of DirectoryReaders for closed chunk indices
-     * @param memChunkReader reader to read MemChunk from reference, this is needed for LiveSeriesIndexLeafReader
-     * @throws IOException if an I/O error occurs during construction
-     */
-    public TSDBDirectoryReader(DirectoryReader liveReader, List<DirectoryReader> closedChunkIndexReaders, MemChunkReader memChunkReader)
-        throws IOException {
-        this(liveReader, closedChunkIndexReaders, memChunkReader, LabelStorageType.BINARY, 0L);
+        this(liveReader, minLiveTimestampSupplier, closedChunkIndexReaders, memChunkReader, LabelStorageType.SORTED_SET, 0L);
     }
 
     /**
@@ -126,20 +126,30 @@ public class TSDBDirectoryReader extends DirectoryReader {
      */
     private static LeafReader[] buildCombinedLeaves(
         DirectoryReader liveDirectoryReader,
-        List<DirectoryReader> closedChunkIndexDirectoryReaders,
+        long minLiveTimestamp,
+        List<DirectoryReaderWithMetadata> closedChunkIndexReadersWithMetadata,
         MemChunkReader memChunkReader,
         LabelStorageType labelStorageType
     ) throws IOException {
         List<LeafReader> combined = new ArrayList<>();
+
+        // Add live series leaf readers
         for (LeafReaderContext ctx : liveDirectoryReader.leaves()) {
             // TODO : pass in already mmaped chunks
-            combined.add(new LiveSeriesIndexLeafReader(ctx.reader(), memChunkReader, labelStorageType));
+            combined.add(new LiveSeriesIndexLeafReader(ctx.reader(), memChunkReader, labelStorageType, minLiveTimestamp));
         }
-        for (DirectoryReader closedReader : closedChunkIndexDirectoryReaders) {
-            for (LeafReaderContext ctx : closedReader.leaves()) {
-                combined.add(new ClosedChunkIndexLeafReader(ctx.reader(), labelStorageType));
+
+        // Add closed chunk leaf readers with metadata
+        for (DirectoryReaderWithMetadata readerWithMetadata : closedChunkIndexReadersWithMetadata) {
+            DirectoryReader reader = readerWithMetadata.reader();
+            long minTimestamp = readerWithMetadata.minTimestamp();
+            long maxTimestamp = readerWithMetadata.maxTimestamp();
+
+            for (LeafReaderContext ctx : reader.leaves()) {
+                combined.add(new ClosedChunkIndexLeafReader(ctx.reader(), labelStorageType, minTimestamp, maxTimestamp));
             }
         }
+
         return combined.toArray(new LeafReader[0]);
     }
 
@@ -178,7 +188,7 @@ public class TSDBDirectoryReader extends DirectoryReader {
 
         for (int i = 0; i < newClosedChunkReaders.size(); i++) {
             DirectoryReader newReader = newClosedChunkReaders.get(i);
-            DirectoryReader oldReader = this.closedChunkIndexDirectoryReaders.get(i);
+            DirectoryReader oldReader = this.closedChunkIndexReadersWithMetadata.get(i).reader();
 
             if (newReader != null && newReader != oldReader) {
                 if (suppressExceptions) {
@@ -211,6 +221,7 @@ public class TSDBDirectoryReader extends DirectoryReader {
         boolean anyReaderChanged = false;
         DirectoryReader newLiveSeriesReader = null;
         List<DirectoryReader> newClosedChunkReaders = new ArrayList<>();
+        List<DirectoryReaderWithMetadata> newClosedChunkReadersWithMetadata = new ArrayList<>();
 
         try {
             // Check for changes in live series reader
@@ -219,15 +230,27 @@ public class TSDBDirectoryReader extends DirectoryReader {
                 anyReaderChanged = true;
             }
 
-            // Check for changes in closed chunk readers
-            for (DirectoryReader reader : this.closedChunkIndexDirectoryReaders) {
-                DirectoryReader newReader = DirectoryReader.openIfChanged(reader);
+            // Check for changes in closed chunk readers, preserving metadata
+            for (int i = 0; i < this.closedChunkIndexReadersWithMetadata.size(); i++) {
+                DirectoryReaderWithMetadata oldReaderWithMetadata = this.closedChunkIndexReadersWithMetadata.get(i);
+                DirectoryReader oldReader = oldReaderWithMetadata.reader();
+                DirectoryReader newReader = DirectoryReader.openIfChanged(oldReader);
 
                 if (newReader != null) {
+                    // Reader changed - create new DirectoryReaderWithMetadata with same metadata
+                    newClosedChunkReadersWithMetadata.add(
+                        new DirectoryReaderWithMetadata(
+                            newReader,
+                            oldReaderWithMetadata.minTimestamp(),
+                            oldReaderWithMetadata.maxTimestamp()
+                        )
+                    );
                     newClosedChunkReaders.add(newReader);
                     anyReaderChanged = true;
                 } else {
-                    newClosedChunkReaders.add(reader);
+                    // Reader unchanged - reuse existing DirectoryReaderWithMetadata
+                    newClosedChunkReadersWithMetadata.add(oldReaderWithMetadata);
+                    newClosedChunkReaders.add(oldReader);
                 }
             }
 
@@ -235,10 +258,10 @@ public class TSDBDirectoryReader extends DirectoryReader {
                 return null;
             }
 
-            // Create new TSDBDirectoryReader with refreshed readers
             TSDBDirectoryReader newTSDBReader = new TSDBDirectoryReader(
                 newLiveSeriesReader != null ? newLiveSeriesReader : this.liveSeriesIndexDirectoryReader,
-                newClosedChunkReaders,
+                minLiveTimestampSupplier,
+                newClosedChunkReadersWithMetadata,
                 memChunkReader,
                 this.labelStorageType,
                 version + 1
@@ -274,8 +297,8 @@ public class TSDBDirectoryReader extends DirectoryReader {
     @Override
     public boolean isCurrent() throws IOException {
         boolean isCurrent = this.liveSeriesIndexDirectoryReader.isCurrent();
-        for (DirectoryReader reader : this.closedChunkIndexDirectoryReaders) {
-            isCurrent = isCurrent && reader.isCurrent();
+        for (DirectoryReaderWithMetadata readerAndMetadata : this.closedChunkIndexReadersWithMetadata) {
+            isCurrent = isCurrent && readerAndMetadata.reader().isCurrent();
         }
         return isCurrent;
     }
@@ -293,9 +316,9 @@ public class TSDBDirectoryReader extends DirectoryReader {
         } catch (IOException e) {
             firstException = e;
         }
-        for (final DirectoryReader r : this.closedChunkIndexDirectoryReaders) {
+        for (final DirectoryReaderWithMetadata r : this.closedChunkIndexReadersWithMetadata) {
             try {
-                r.decRef();
+                r.reader().decRef();
             } catch (IOException e) {
                 if (firstException == null) {
                     firstException = e;
@@ -325,7 +348,6 @@ public class TSDBDirectoryReader extends DirectoryReader {
      * @return the number of closed chunk index readers
      */
     public int getClosedChunkReadersCount() {
-        return this.closedChunkIndexDirectoryReaders.size();
+        return this.closedChunkIndexReadersWithMetadata.size();
     }
-
 }

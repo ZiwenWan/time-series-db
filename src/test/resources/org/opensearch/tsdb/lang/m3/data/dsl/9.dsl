@@ -4,110 +4,138 @@
     "bool" : {
       "should" : [
         {
-          "bool" : {
-            "filter" : [
-              {
-                "terms" : {
-                  "labels" : [
-                    "name:a"
-                  ],
-                  "boost" : 1.0
-                }
-              },
-              {
-                "range" : {
-                  "timestamp_range" : {
-                    "from" : 1000000000,
-                    "to" : 1001000000,
-                    "include_lower" : true,
-                    "include_upper" : false,
-                    "boost" : 1.0
+          "time_range_pruner" : {
+            "min_timestamp" : 1000000000,
+            "max_timestamp" : 1001000000,
+            "query" : {
+              "bool" : {
+                "filter" : [
+                  {
+                    "range" : {
+                      "timestamp_range" : {
+                        "from" : 1000000000,
+                        "to" : 1001000000,
+                        "include_lower" : true,
+                        "include_upper" : false,
+                        "boost" : 1.0
+                      }
+                    }
+                  },
+                  {
+                    "terms" : {
+                      "labels" : [
+                        "name:a"
+                      ],
+                      "boost" : 1.0
+                    }
                   }
-                }
+                ],
+                "adjust_pure_negative" : true,
+                "boost" : 1.0
               }
-            ],
-            "adjust_pure_negative" : true,
+            },
             "boost" : 1.0
           }
         },
         {
-          "bool" : {
-            "filter" : [
-              {
-                "terms" : {
-                  "labels" : [
-                    "name:b"
-                  ],
-                  "boost" : 1.0
-                }
-              },
-              {
-                "range" : {
-                  "timestamp_range" : {
-                    "from" : 1000000000,
-                    "to" : 1001000000,
-                    "include_lower" : true,
-                    "include_upper" : false,
-                    "boost" : 1.0
+          "time_range_pruner" : {
+            "min_timestamp" : 1000000000,
+            "max_timestamp" : 1001000000,
+            "query" : {
+              "bool" : {
+                "filter" : [
+                  {
+                    "range" : {
+                      "timestamp_range" : {
+                        "from" : 1000000000,
+                        "to" : 1001000000,
+                        "include_lower" : true,
+                        "include_upper" : false,
+                        "boost" : 1.0
+                      }
+                    }
+                  },
+                  {
+                    "terms" : {
+                      "labels" : [
+                        "name:b"
+                      ],
+                      "boost" : 1.0
+                    }
                   }
-                }
+                ],
+                "adjust_pure_negative" : true,
+                "boost" : 1.0
               }
-            ],
-            "adjust_pure_negative" : true,
+            },
             "boost" : 1.0
           }
         },
         {
-          "bool" : {
-            "filter" : [
-              {
-                "terms" : {
-                  "labels" : [
-                    "name:c"
-                  ],
-                  "boost" : 1.0
-                }
-              },
-              {
-                "range" : {
-                  "timestamp_range" : {
-                    "from" : 1000000000,
-                    "to" : 1001000000,
-                    "include_lower" : true,
-                    "include_upper" : false,
-                    "boost" : 1.0
+          "time_range_pruner" : {
+            "min_timestamp" : 1000000000,
+            "max_timestamp" : 1001000000,
+            "query" : {
+              "bool" : {
+                "filter" : [
+                  {
+                    "range" : {
+                      "timestamp_range" : {
+                        "from" : 1000000000,
+                        "to" : 1001000000,
+                        "include_lower" : true,
+                        "include_upper" : false,
+                        "boost" : 1.0
+                      }
+                    }
+                  },
+                  {
+                    "terms" : {
+                      "labels" : [
+                        "name:c"
+                      ],
+                      "boost" : 1.0
+                    }
                   }
-                }
+                ],
+                "adjust_pure_negative" : true,
+                "boost" : 1.0
               }
-            ],
-            "adjust_pure_negative" : true,
+            },
             "boost" : 1.0
           }
         },
         {
-          "bool" : {
-            "filter" : [
-              {
-                "terms" : {
-                  "labels" : [
-                    "name:d"
-                  ],
-                  "boost" : 1.0
-                }
-              },
-              {
-                "range" : {
-                  "timestamp_range" : {
-                    "from" : 1000000000,
-                    "to" : 1001000000,
-                    "include_lower" : true,
-                    "include_upper" : false,
-                    "boost" : 1.0
+          "time_range_pruner" : {
+            "min_timestamp" : 1000000000,
+            "max_timestamp" : 1001000000,
+            "query" : {
+              "bool" : {
+                "filter" : [
+                  {
+                    "range" : {
+                      "timestamp_range" : {
+                        "from" : 1000000000,
+                        "to" : 1001000000,
+                        "include_lower" : true,
+                        "include_upper" : false,
+                        "boost" : 1.0
+                      }
+                    }
+                  },
+                  {
+                    "terms" : {
+                      "labels" : [
+                        "name:d"
+                      ],
+                      "boost" : 1.0
+                    }
                   }
-                }
+                ],
+                "adjust_pure_negative" : true,
+                "boost" : 1.0
               }
-            ],
-            "adjust_pure_negative" : true,
+            },
             "boost" : 1.0
           }
         }
@@ -121,29 +149,36 @@
   "aggregations" : {
     "0" : {
       "filter" : {
-        "bool" : {
-          "filter" : [
-            {
-              "terms" : {
-                "labels" : [
-                  "name:a"
-                ],
-                "boost" : 1.0
-              }
-            },
-            {
-              "range" : {
-                "timestamp_range" : {
-                  "from" : 1000000000,
-                  "to" : 1001000000,
-                  "include_lower" : true,
-                  "include_upper" : false,
-                  "boost" : 1.0
+        "time_range_pruner" : {
+          "min_timestamp" : 1000000000,
+          "max_timestamp" : 1001000000,
+          "query" : {
+            "bool" : {
+              "filter" : [
+                {
+                  "range" : {
+                    "timestamp_range" : {
+                      "from" : 1000000000,
+                      "to" : 1001000000,
+                      "include_lower" : true,
+                      "include_upper" : false,
+                      "boost" : 1.0
+                    }
+                  }
+                },
+                {
+                  "terms" : {
+                    "labels" : [
+                      "name:a"
+                    ],
+                    "boost" : 1.0
+                  }
                 }
-              }
+              ],
+              "adjust_pure_negative" : true,
+              "boost" : 1.0
             }
-          ],
-          "adjust_pure_negative" : true,
+          },
           "boost" : 1.0
         }
       },
@@ -159,29 +194,36 @@
     },
     "1" : {
       "filter" : {
-        "bool" : {
-          "filter" : [
-            {
-              "terms" : {
-                "labels" : [
-                  "name:b"
-                ],
-                "boost" : 1.0
-              }
-            },
-            {
-              "range" : {
-                "timestamp_range" : {
-                  "from" : 1000000000,
-                  "to" : 1001000000,
-                  "include_lower" : true,
-                  "include_upper" : false,
-                  "boost" : 1.0
+        "time_range_pruner" : {
+          "min_timestamp" : 1000000000,
+          "max_timestamp" : 1001000000,
+          "query" : {
+            "bool" : {
+              "filter" : [
+                {
+                  "range" : {
+                    "timestamp_range" : {
+                      "from" : 1000000000,
+                      "to" : 1001000000,
+                      "include_lower" : true,
+                      "include_upper" : false,
+                      "boost" : 1.0
+                    }
+                  }
+                },
+                {
+                  "terms" : {
+                    "labels" : [
+                      "name:b"
+                    ],
+                    "boost" : 1.0
+                  }
                 }
-              }
+              ],
+              "adjust_pure_negative" : true,
+              "boost" : 1.0
             }
-          ],
-          "adjust_pure_negative" : true,
+          },
           "boost" : 1.0
         }
       },
@@ -197,29 +239,36 @@
     },
     "3" : {
       "filter" : {
-        "bool" : {
-          "filter" : [
-            {
-              "terms" : {
-                "labels" : [
-                  "name:c"
-                ],
-                "boost" : 1.0
-              }
-            },
-            {
-              "range" : {
-                "timestamp_range" : {
-                  "from" : 1000000000,
-                  "to" : 1001000000,
-                  "include_lower" : true,
-                  "include_upper" : false,
-                  "boost" : 1.0
+        "time_range_pruner" : {
+          "min_timestamp" : 1000000000,
+          "max_timestamp" : 1001000000,
+          "query" : {
+            "bool" : {
+              "filter" : [
+                {
+                  "range" : {
+                    "timestamp_range" : {
+                      "from" : 1000000000,
+                      "to" : 1001000000,
+                      "include_lower" : true,
+                      "include_upper" : false,
+                      "boost" : 1.0
+                    }
+                  }
+                },
+                {
+                  "terms" : {
+                    "labels" : [
+                      "name:c"
+                    ],
+                    "boost" : 1.0
+                  }
                 }
-              }
+              ],
+              "adjust_pure_negative" : true,
+              "boost" : 1.0
             }
-          ],
-          "adjust_pure_negative" : true,
+          },
           "boost" : 1.0
         }
       },
@@ -235,29 +284,36 @@
     },
     "4" : {
       "filter" : {
-        "bool" : {
-          "filter" : [
-            {
-              "terms" : {
-                "labels" : [
-                  "name:d"
-                ],
-                "boost" : 1.0
-              }
-            },
-            {
-              "range" : {
-                "timestamp_range" : {
-                  "from" : 1000000000,
-                  "to" : 1001000000,
-                  "include_lower" : true,
-                  "include_upper" : false,
-                  "boost" : 1.0
+        "time_range_pruner" : {
+          "min_timestamp" : 1000000000,
+          "max_timestamp" : 1001000000,
+          "query" : {
+            "bool" : {
+              "filter" : [
+                {
+                  "range" : {
+                    "timestamp_range" : {
+                      "from" : 1000000000,
+                      "to" : 1001000000,
+                      "include_lower" : true,
+                      "include_upper" : false,
+                      "boost" : 1.0
+                    }
+                  }
+                },
+                {
+                  "terms" : {
+                    "labels" : [
+                      "name:d"
+                    ],
+                    "boost" : 1.0
+                  }
                 }
-              }
+              ],
+              "adjust_pure_negative" : true,
+              "boost" : 1.0
             }
-          ],
-          "adjust_pure_negative" : true,
+          },
           "boost" : 1.0
         }
       },

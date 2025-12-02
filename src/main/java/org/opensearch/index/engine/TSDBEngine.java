@@ -191,7 +191,7 @@ public class TSDBEngine extends Engine {
             final Map<String, String> userData = lastCommittedSegmentInfos.getUserData();
             // Read history UUID directly from userData (avoid protected API)
             this.historyUUID = userData.get(Engine.HISTORY_UUID_KEY);
-            this.tsdbReaderManager = getTsdbReaderManager();
+            this.tsdbReaderManager = getTSDBReaderManager();
             success = true;
         } finally {
             if (success == false) {
@@ -1257,10 +1257,11 @@ public class TSDBEngine extends Engine {
      * Creates and returns a TSDB directory reader reference manager that aggregates
      * readers from both the live series index and closed chunk indexes.
      */
-    private ReferenceManager<OpenSearchDirectoryReader> getTsdbReaderManager() {
+    private ReferenceManager<OpenSearchDirectoryReader> getTSDBReaderManager() {
         try {
             return new TSDBDirectoryReaderReferenceManager(
                 head.getLiveSeriesIndex().getDirectoryReaderManager(),
+                head::getMinTimestamp,
                 closedChunkIndexManager,
                 head.getChunkReader(),
                 head.getLiveSeriesIndex().getLabelStorageType(),

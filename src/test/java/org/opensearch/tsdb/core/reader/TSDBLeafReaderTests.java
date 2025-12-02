@@ -272,4 +272,196 @@ public class TSDBLeafReaderTests extends OpenSearchTestCase {
 
         indexWriter.addDocument(doc2);
     }
+
+    /**
+     * Test that ClosedChunkIndexLeafReader with metadata constructor stores time bounds correctly
+     */
+    public void testClosedChunkIndexLeafReaderWithMetadata() throws IOException {
+        createClosedChunkTestDocuments();
+        indexWriter.commit();
+
+        try (DirectoryReader reader = DirectoryReader.open(directory)) {
+            LeafReaderContext context = reader.leaves().get(0);
+            LeafReader leafReader = context.reader();
+
+            // Create reader with metadata (minTimestamp=1000, maxTimestamp=5000)
+            ClosedChunkIndexLeafReader metricsReader = new ClosedChunkIndexLeafReader(leafReader, LabelStorageType.BINARY, 1000L, 5000L);
+
+            // Verify metadata is stored correctly
+            assertEquals("Min timestamp should be 1000", 1000L, metricsReader.getMinIndexTimestamp());
+            assertEquals("Max timestamp should be 5000", 5000L, metricsReader.getMaxIndexTimestamp());
+        }
+    }
+
+    /**
+     * Test that old constructor (without metadata) uses default values
+     */
+    public void testClosedChunkIndexLeafReaderWithoutMetadata() throws IOException {
+        createClosedChunkTestDocuments();
+        indexWriter.commit();
+
+        try (DirectoryReader reader = DirectoryReader.open(directory)) {
+            LeafReaderContext context = reader.leaves().get(0);
+            LeafReader leafReader = context.reader();
+
+            // Create reader without metadata (old constructor)
+            ClosedChunkIndexLeafReader metricsReader = new ClosedChunkIndexLeafReader(leafReader, LabelStorageType.BINARY);
+
+            // Verify default values are used
+            assertEquals("Min timestamp should be Long.MIN_VALUE", Long.MIN_VALUE, metricsReader.getMinIndexTimestamp());
+            assertEquals("Max timestamp should be Long.MAX_VALUE", Long.MAX_VALUE, metricsReader.getMaxIndexTimestamp());
+        }
+    }
+
+    /**
+     * Test overlapsTimeRange with various scenarios
+     */
+    public void testOverlapsTimeRange() throws IOException {
+        createClosedChunkTestDocuments();
+        indexWriter.commit();
+
+        try (DirectoryReader reader = DirectoryReader.open(directory)) {
+            LeafReaderContext context = reader.leaves().get(0);
+            LeafReader leafReader = context.reader();
+
+            // Leaf with time range [1000, 5000]
+            ClosedChunkIndexLeafReader metricsReader = new ClosedChunkIndexLeafReader(leafReader, LabelStorageType.BINARY, 1000L, 5000L);
+
+            // Test case 1: Query completely overlaps leaf
+            assertTrue("Query [0, 10000) should overlap [1000, 5000]", metricsReader.overlapsTimeRange(0L, 10000L));
+
+            // Test case 2: Query partially overlaps (before)
+            assertTrue("Query [500, 2000) should overlap [1000, 5000]", metricsReader.overlapsTimeRange(500L, 2000L));
+
+            // Test case 3: Query partially overlaps (after)
+            assertTrue("Query [3000, 6000) should overlap [1000, 5000]", metricsReader.overlapsTimeRange(3000L, 6000L));
+
+            // Test case 4: Query completely inside leaf
+            assertTrue("Query [2000, 3000) should overlap [1000, 5000]", metricsReader.overlapsTimeRange(2000L, 3000L));
+
+            // Test case 5: Query starts at leaf's max (edge case - should overlap)
+            assertTrue("Query [5000, 6000) should overlap [1000, 5000]", metricsReader.overlapsTimeRange(5000L, 6000L));
+
+            // Test case 6: Query ends at leaf's min (edge case - should NOT overlap)
+            assertFalse("Query [0, 1000) should NOT overlap [1000, 5000]", metricsReader.overlapsTimeRange(0L, 1000L));
+
+            // Test case 7: Query completely before leaf
+            assertFalse("Query [0, 500) should NOT overlap [1000, 5000]", metricsReader.overlapsTimeRange(0L, 500L));
+
+            // Test case 8: Query completely after leaf
+            assertFalse("Query [6000, 7000) should NOT overlap [1000, 5000]", metricsReader.overlapsTimeRange(6000L, 7000L));
+        }
+    }
+
+    /**
+     * Test that reader without metadata (old constructor) always overlaps
+     */
+    public void testOverlapsTimeRangeWithoutMetadata() throws IOException {
+        createClosedChunkTestDocuments();
+        indexWriter.commit();
+
+        try (DirectoryReader reader = DirectoryReader.open(directory)) {
+            LeafReaderContext context = reader.leaves().get(0);
+            LeafReader leafReader = context.reader();
+
+            // Create reader without metadata (uses Long.MIN_VALUE and Long.MAX_VALUE)
+            ClosedChunkIndexLeafReader metricsReader = new ClosedChunkIndexLeafReader(leafReader, LabelStorageType.BINARY);
+
+            // Should overlap with any reasonable query range
+            assertTrue("Reader without metadata should overlap with [0, 1000)", metricsReader.overlapsTimeRange(0L, 1000L));
+
+            assertTrue("Reader without metadata should overlap with [1000, 2000)", metricsReader.overlapsTimeRange(1000L, 2000L));
+
+            assertTrue(
+                "Reader without metadata should overlap with [Long.MAX_VALUE-1000, Long.MAX_VALUE)",
+                metricsReader.overlapsTimeRange(Long.MAX_VALUE - 1000L, Long.MAX_VALUE)
+            );
+        }
+    }
+
+    /**
+     * Test pruning scenario: Multiple leaves with different time ranges
+     */
+    public void testPruningMultipleLeaves() throws IOException {
+        // Create multiple documents with different time ranges
+        createClosedChunkTestDocuments();
+        indexWriter.commit();
+
+        try (DirectoryReader reader = DirectoryReader.open(directory)) {
+            LeafReaderContext context = reader.leaves().get(0);
+            LeafReader leafReader = context.reader();
+
+            // Simulate 3 leaves with different time ranges
+            // Leaf 1: [0, 1000]
+            ClosedChunkIndexLeafReader leaf1 = new ClosedChunkIndexLeafReader(leafReader, LabelStorageType.BINARY, 0L, 1000L);
+
+            // Leaf 2: [1000, 2000]
+            ClosedChunkIndexLeafReader leaf2 = new ClosedChunkIndexLeafReader(leafReader, LabelStorageType.BINARY, 1000L, 2000L);
+
+            // Leaf 3: [2000, 3000]
+            ClosedChunkIndexLeafReader leaf3 = new ClosedChunkIndexLeafReader(leafReader, LabelStorageType.BINARY, 2000L, 3000L);
+
+            // Query for [1500, 2500) - should only match leaf2 and leaf3
+            long queryStart = 1500L;
+            long queryEnd = 2500L;
+
+            assertFalse("Leaf 1 [0, 1000] should be pruned for query [1500, 2500)", leaf1.overlapsTimeRange(queryStart, queryEnd));
+
+            assertTrue("Leaf 2 [1000, 2000] should NOT be pruned for query [1500, 2500)", leaf2.overlapsTimeRange(queryStart, queryEnd));
+
+            assertTrue("Leaf 3 [2000, 3000] should NOT be pruned for query [1500, 2500)", leaf3.overlapsTimeRange(queryStart, queryEnd));
+        }
+    }
+
+    /**
+     * Test edge case: Query with equal start and end (empty range)
+     */
+    public void testOverlapsTimeRangeEmptyQuery() throws IOException {
+        createClosedChunkTestDocuments();
+        indexWriter.commit();
+
+        try (DirectoryReader reader = DirectoryReader.open(directory)) {
+            LeafReaderContext context = reader.leaves().get(0);
+            LeafReader leafReader = context.reader();
+
+            ClosedChunkIndexLeafReader metricsReader = new ClosedChunkIndexLeafReader(leafReader, LabelStorageType.BINARY, 1000L, 5000L);
+
+            // Query with start == end (empty range) should not overlap
+            assertFalse("Empty query [2000, 2000) should NOT overlap", metricsReader.overlapsTimeRange(2000L, 2000L));
+        }
+    }
+
+    /**
+     * Test edge case: Leaf with single timestamp (min == max)
+     */
+    public void testOverlapsTimeRangeSingleTimestampLeaf() throws IOException {
+        createClosedChunkTestDocuments();
+        indexWriter.commit();
+
+        try (DirectoryReader reader = DirectoryReader.open(directory)) {
+            LeafReaderContext context = reader.leaves().get(0);
+            LeafReader leafReader = context.reader();
+
+            // Leaf with single timestamp: [2000, 2000]
+            ClosedChunkIndexLeafReader metricsReader = new ClosedChunkIndexLeafReader(leafReader, LabelStorageType.BINARY, 2000L, 2000L);
+
+            // Query that includes this timestamp
+            assertTrue(
+                "Query [2000, 3000) should overlap with single timestamp leaf [2000, 2000]",
+                metricsReader.overlapsTimeRange(2000L, 3000L)
+            );
+
+            // Query that excludes this timestamp (ends at 2000)
+            assertFalse(
+                "Query [1000, 2000) should NOT overlap with single timestamp leaf [2000, 2000]",
+                metricsReader.overlapsTimeRange(1000L, 2000L)
+            );
+
+            // Query after this timestamp
+            assertFalse(
+                "Query [3000, 4000) should NOT overlap with single timestamp leaf [2000, 2000]",
+                metricsReader.overlapsTimeRange(3000L, 4000L)
+            );
+        }
+    }
 }

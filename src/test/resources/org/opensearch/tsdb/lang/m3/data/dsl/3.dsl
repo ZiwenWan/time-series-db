@@ -4,110 +4,138 @@
     "bool" : {
       "should" : [
         {
-          "bool" : {
-            "filter" : [
-              {
-                "terms" : {
-                  "labels" : [
-                    "region:west"
-                  ],
-                  "boost" : 1.0
-                }
-              },
-              {
-                "range" : {
-                  "timestamp_range" : {
-                    "from" : 996400000,
-                    "to" : 1001000000,
-                    "include_lower" : true,
-                    "include_upper" : false,
-                    "boost" : 1.0
+          "time_range_pruner" : {
+            "min_timestamp" : 996400000,
+            "max_timestamp" : 1001000000,
+            "query" : {
+              "bool" : {
+                "filter" : [
+                  {
+                    "range" : {
+                      "timestamp_range" : {
+                        "from" : 996400000,
+                        "to" : 1001000000,
+                        "include_lower" : true,
+                        "include_upper" : false,
+                        "boost" : 1.0
+                      }
+                    }
+                  },
+                  {
+                    "terms" : {
+                      "labels" : [
+                        "region:west"
+                      ],
+                      "boost" : 1.0
+                    }
                   }
-                }
+                ],
+                "adjust_pure_negative" : true,
+                "boost" : 1.0
               }
-            ],
-            "adjust_pure_negative" : true,
+            },
             "boost" : 1.0
           }
         },
         {
-          "bool" : {
-            "filter" : [
-              {
-                "terms" : {
-                  "labels" : [
-                    "region:west"
-                  ],
-                  "boost" : 1.0
-                }
-              },
-              {
-                "range" : {
-                  "timestamp_range" : {
-                    "from" : 996400000,
-                    "to" : 1001000000,
-                    "include_lower" : true,
-                    "include_upper" : false,
-                    "boost" : 1.0
+          "time_range_pruner" : {
+            "min_timestamp" : 996400000,
+            "max_timestamp" : 1001000000,
+            "query" : {
+              "bool" : {
+                "filter" : [
+                  {
+                    "range" : {
+                      "timestamp_range" : {
+                        "from" : 996400000,
+                        "to" : 1001000000,
+                        "include_lower" : true,
+                        "include_upper" : false,
+                        "boost" : 1.0
+                      }
+                    }
+                  },
+                  {
+                    "terms" : {
+                      "labels" : [
+                        "region:west"
+                      ],
+                      "boost" : 1.0
+                    }
                   }
-                }
+                ],
+                "adjust_pure_negative" : true,
+                "boost" : 1.0
               }
-            ],
-            "adjust_pure_negative" : true,
+            },
             "boost" : 1.0
           }
         },
         {
-          "bool" : {
-            "filter" : [
-              {
-                "terms" : {
-                  "labels" : [
-                    "region:west"
-                  ],
-                  "boost" : 1.0
-                }
-              },
-              {
-                "range" : {
-                  "timestamp_range" : {
-                    "from" : 910000000,
-                    "to" : 914600000,
-                    "include_lower" : true,
-                    "include_upper" : false,
-                    "boost" : 1.0
+          "time_range_pruner" : {
+            "min_timestamp" : 910000000,
+            "max_timestamp" : 914600000,
+            "query" : {
+              "bool" : {
+                "filter" : [
+                  {
+                    "range" : {
+                      "timestamp_range" : {
+                        "from" : 910000000,
+                        "to" : 914600000,
+                        "include_lower" : true,
+                        "include_upper" : false,
+                        "boost" : 1.0
+                      }
+                    }
+                  },
+                  {
+                    "terms" : {
+                      "labels" : [
+                        "region:west"
+                      ],
+                      "boost" : 1.0
+                    }
                   }
-                }
+                ],
+                "adjust_pure_negative" : true,
+                "boost" : 1.0
               }
-            ],
-            "adjust_pure_negative" : true,
+            },
             "boost" : 1.0
           }
         },
         {
-          "bool" : {
-            "filter" : [
-              {
-                "terms" : {
-                  "labels" : [
-                    "region:west"
-                  ],
-                  "boost" : 1.0
-                }
-              },
-              {
-                "range" : {
-                  "timestamp_range" : {
-                    "from" : 823600000,
-                    "to" : 828200000,
-                    "include_lower" : true,
-                    "include_upper" : false,
-                    "boost" : 1.0
+          "time_range_pruner" : {
+            "min_timestamp" : 823600000,
+            "max_timestamp" : 828200000,
+            "query" : {
+              "bool" : {
+                "filter" : [
+                  {
+                    "range" : {
+                      "timestamp_range" : {
+                        "from" : 823600000,
+                        "to" : 828200000,
+                        "include_lower" : true,
+                        "include_upper" : false,
+                        "boost" : 1.0
+                      }
+                    }
+                  },
+                  {
+                    "terms" : {
+                      "labels" : [
+                        "region:west"
+                      ],
+                      "boost" : 1.0
+                    }
                   }
-                }
+                ],
+                "adjust_pure_negative" : true,
+                "boost" : 1.0
               }
-            ],
-            "adjust_pure_negative" : true,
+            },
             "boost" : 1.0
           }
         }
@@ -121,29 +149,36 @@
   "aggregations" : {
     "0" : {
       "filter" : {
-        "bool" : {
-          "filter" : [
-            {
-              "terms" : {
-                "labels" : [
-                  "region:west"
-                ],
-                "boost" : 1.0
-              }
-            },
-            {
-              "range" : {
-                "timestamp_range" : {
-                  "from" : 996400000,
-                  "to" : 1001000000,
-                  "include_lower" : true,
-                  "include_upper" : false,
-                  "boost" : 1.0
+        "time_range_pruner" : {
+          "min_timestamp" : 996400000,
+          "max_timestamp" : 1001000000,
+          "query" : {
+            "bool" : {
+              "filter" : [
+                {
+                  "range" : {
+                    "timestamp_range" : {
+                      "from" : 996400000,
+                      "to" : 1001000000,
+                      "include_lower" : true,
+                      "include_upper" : false,
+                      "boost" : 1.0
+                    }
+                  }
+                },
+                {
+                  "terms" : {
+                    "labels" : [
+                      "region:west"
+                    ],
+                    "boost" : 1.0
+                  }
                 }
-              }
+              ],
+              "adjust_pure_negative" : true,
+              "boost" : 1.0
             }
-          ],
-          "adjust_pure_negative" : true,
+          },
           "boost" : 1.0
         }
       },
@@ -167,29 +202,36 @@
     },
     "4" : {
       "filter" : {
-        "bool" : {
-          "filter" : [
-            {
-              "terms" : {
-                "labels" : [
-                  "region:west"
-                ],
-                "boost" : 1.0
-              }
-            },
-            {
-              "range" : {
-                "timestamp_range" : {
-                  "from" : 996400000,
-                  "to" : 1001000000,
-                  "include_lower" : true,
-                  "include_upper" : false,
-                  "boost" : 1.0
+        "time_range_pruner" : {
+          "min_timestamp" : 996400000,
+          "max_timestamp" : 1001000000,
+          "query" : {
+            "bool" : {
+              "filter" : [
+                {
+                  "range" : {
+                    "timestamp_range" : {
+                      "from" : 996400000,
+                      "to" : 1001000000,
+                      "include_lower" : true,
+                      "include_upper" : false,
+                      "boost" : 1.0
+                    }
+                  }
+                },
+                {
+                  "terms" : {
+                    "labels" : [
+                      "region:west"
+                    ],
+                    "boost" : 1.0
+                  }
                 }
-              }
+              ],
+              "adjust_pure_negative" : true,
+              "boost" : 1.0
             }
-          ],
-          "adjust_pure_negative" : true,
+          },
           "boost" : 1.0
         }
       },
@@ -213,29 +255,36 @@
     },
     "8" : {
       "filter" : {
-        "bool" : {
-          "filter" : [
-            {
-              "terms" : {
-                "labels" : [
-                  "region:west"
-                ],
-                "boost" : 1.0
-              }
-            },
-            {
-              "range" : {
-                "timestamp_range" : {
-                  "from" : 910000000,
-                  "to" : 914600000,
-                  "include_lower" : true,
-                  "include_upper" : false,
-                  "boost" : 1.0
+        "time_range_pruner" : {
+          "min_timestamp" : 910000000,
+          "max_timestamp" : 914600000,
+          "query" : {
+            "bool" : {
+              "filter" : [
+                {
+                  "range" : {
+                    "timestamp_range" : {
+                      "from" : 910000000,
+                      "to" : 914600000,
+                      "include_lower" : true,
+                      "include_upper" : false,
+                      "boost" : 1.0
+                    }
+                  }
+                },
+                {
+                  "terms" : {
+                    "labels" : [
+                      "region:west"
+                    ],
+                    "boost" : 1.0
+                  }
                 }
-              }
+              ],
+              "adjust_pure_negative" : true,
+              "boost" : 1.0
             }
-          ],
-          "adjust_pure_negative" : true,
+          },
           "boost" : 1.0
         }
       },
@@ -259,29 +308,36 @@
     },
     "14" : {
       "filter" : {
-        "bool" : {
-          "filter" : [
-            {
-              "terms" : {
-                "labels" : [
-                  "region:west"
-                ],
-                "boost" : 1.0
-              }
-            },
-            {
-              "range" : {
-                "timestamp_range" : {
-                  "from" : 823600000,
-                  "to" : 828200000,
-                  "include_lower" : true,
-                  "include_upper" : false,
-                  "boost" : 1.0
+        "time_range_pruner" : {
+          "min_timestamp" : 823600000,
+          "max_timestamp" : 828200000,
+          "query" : {
+            "bool" : {
+              "filter" : [
+                {
+                  "range" : {
+                    "timestamp_range" : {
+                      "from" : 823600000,
+                      "to" : 828200000,
+                      "include_lower" : true,
+                      "include_upper" : false,
+                      "boost" : 1.0
+                    }
+                  }
+                },
+                {
+                  "terms" : {
+                    "labels" : [
+                      "region:west"
+                    ],
+                    "boost" : 1.0
+                  }
                 }
-              }
+              ],
+              "adjust_pure_negative" : true,
+              "boost" : 1.0
             }
-          ],
-          "adjust_pure_negative" : true,
+          },
           "boost" : 1.0
         }
       },

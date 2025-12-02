@@ -4,179 +4,214 @@
     "bool" : {
       "should" : [
         {
-          "bool" : {
-            "filter" : [
-              {
-                "terms" : {
-                  "labels" : [
-                    "service:logger"
-                  ],
-                  "boost" : 1.0
-                }
-              },
-              {
-                "terms" : {
-                  "labels" : [
-                    "name:logs"
-                  ],
-                  "boost" : 1.0
-                }
-              },
-              {
-                "range" : {
-                  "timestamp_range" : {
-                    "from" : 999700000,
-                    "to" : 1001000000,
-                    "include_lower" : true,
-                    "include_upper" : false,
-                    "boost" : 1.0
+          "time_range_pruner" : {
+            "min_timestamp" : 999700000,
+            "max_timestamp" : 1001000000,
+            "query" : {
+              "bool" : {
+                "filter" : [
+                  {
+                    "range" : {
+                      "timestamp_range" : {
+                        "from" : 999700000,
+                        "to" : 1001000000,
+                        "include_lower" : true,
+                        "include_upper" : false,
+                        "boost" : 1.0
+                      }
+                    }
+                  },
+                  {
+                    "terms" : {
+                      "labels" : [
+                        "service:logger"
+                      ],
+                      "boost" : 1.0
+                    }
+                  },
+                  {
+                    "terms" : {
+                      "labels" : [
+                        "name:logs"
+                      ],
+                      "boost" : 1.0
+                    }
                   }
-                }
+                ],
+                "adjust_pure_negative" : true,
+                "boost" : 1.0
               }
-            ],
-            "adjust_pure_negative" : true,
+            },
             "boost" : 1.0
           }
         },
         {
-          "bool" : {
-            "filter" : [
-              {
-                "terms" : {
-                  "labels" : [
-                    "service:logger"
-                  ],
-                  "boost" : 1.0
-                }
-              },
-              {
-                "terms" : {
-                  "labels" : [
-                    "name:attempts"
-                  ],
-                  "boost" : 1.0
-                }
-              },
-              {
-                "range" : {
-                  "timestamp_range" : {
-                    "from" : 999700000,
-                    "to" : 1001000000,
-                    "include_lower" : true,
-                    "include_upper" : false,
-                    "boost" : 1.0
+          "time_range_pruner" : {
+            "min_timestamp" : 999700000,
+            "max_timestamp" : 1001000000,
+            "query" : {
+              "bool" : {
+                "filter" : [
+                  {
+                    "range" : {
+                      "timestamp_range" : {
+                        "from" : 999700000,
+                        "to" : 1001000000,
+                        "include_lower" : true,
+                        "include_upper" : false,
+                        "boost" : 1.0
+                      }
+                    }
+                  },
+                  {
+                    "terms" : {
+                      "labels" : [
+                        "service:logger"
+                      ],
+                      "boost" : 1.0
+                    }
+                  },
+                  {
+                    "terms" : {
+                      "labels" : [
+                        "name:attempts"
+                      ],
+                      "boost" : 1.0
+                    }
                   }
-                }
+                ],
+                "adjust_pure_negative" : true,
+                "boost" : 1.0
               }
-            ],
-            "adjust_pure_negative" : true,
+            },
             "boost" : 1.0
           }
         },
         {
-          "bool" : {
-            "filter" : [
-              {
-                "terms" : {
-                  "labels" : [
-                    "service:logger"
-                  ],
-                  "boost" : 1.0
-                }
-              },
-              {
-                "range" : {
-                  "timestamp_range" : {
-                    "from" : 999700000,
-                    "to" : 1001000000,
-                    "include_lower" : true,
-                    "include_upper" : false,
-                    "boost" : 1.0
+          "time_range_pruner" : {
+            "min_timestamp" : 999700000,
+            "max_timestamp" : 1001000000,
+            "query" : {
+              "bool" : {
+                "filter" : [
+                  {
+                    "range" : {
+                      "timestamp_range" : {
+                        "from" : 999700000,
+                        "to" : 1001000000,
+                        "include_lower" : true,
+                        "include_upper" : false,
+                        "boost" : 1.0
+                      }
+                    }
+                  },
+                  {
+                    "terms" : {
+                      "labels" : [
+                        "service:logger"
+                      ],
+                      "boost" : 1.0
+                    }
                   }
-                }
+                ],
+                "must_not" : [
+                  {
+                    "terms" : {
+                      "labels" : [
+                        "error_type:backoff"
+                      ],
+                      "boost" : 1.0
+                    }
+                  }
+                ],
+                "adjust_pure_negative" : true,
+                "boost" : 1.0
               }
-            ],
-            "must_not" : [
-              {
-                "terms" : {
-                  "labels" : [
-                    "error_type:backoff"
-                  ],
-                  "boost" : 1.0
-                }
-              }
-            ],
-            "adjust_pure_negative" : true,
+            },
             "boost" : 1.0
           }
         },
         {
-          "bool" : {
-            "filter" : [
-              {
-                "terms" : {
-                  "labels" : [
-                    "service:logger"
-                  ],
-                  "boost" : 1.0
-                }
-              },
-              {
-                "wildcard" : {
-                  "labels" : {
-                    "wildcard" : "error_type:*",
-                    "boost" : 1.0
+          "time_range_pruner" : {
+            "min_timestamp" : 999700000,
+            "max_timestamp" : 1001000000,
+            "query" : {
+              "bool" : {
+                "filter" : [
+                  {
+                    "range" : {
+                      "timestamp_range" : {
+                        "from" : 999700000,
+                        "to" : 1001000000,
+                        "include_lower" : true,
+                        "include_upper" : false,
+                        "boost" : 1.0
+                      }
+                    }
+                  },
+                  {
+                    "terms" : {
+                      "labels" : [
+                        "service:logger"
+                      ],
+                      "boost" : 1.0
+                    }
+                  },
+                  {
+                    "wildcard" : {
+                      "labels" : {
+                        "wildcard" : "error_type:*",
+                        "boost" : 1.0
+                      }
+                    }
                   }
-                }
-              },
-              {
-                "range" : {
-                  "timestamp_range" : {
-                    "from" : 999700000,
-                    "to" : 1001000000,
-                    "include_lower" : true,
-                    "include_upper" : false,
-                    "boost" : 1.0
-                  }
-                }
+                ],
+                "adjust_pure_negative" : true,
+                "boost" : 1.0
               }
-            ],
-            "adjust_pure_negative" : true,
+            },
             "boost" : 1.0
           }
         },
         {
-          "bool" : {
-            "filter" : [
-              {
-                "terms" : {
-                  "labels" : [
-                    "service:logger"
-                  ],
-                  "boost" : 1.0
-                }
-              },
-              {
-                "terms" : {
-                  "labels" : [
-                    "name:attempts"
-                  ],
-                  "boost" : 1.0
-                }
-              },
-              {
-                "range" : {
-                  "timestamp_range" : {
-                    "from" : 999700000,
-                    "to" : 1001000000,
-                    "include_lower" : true,
-                    "include_upper" : false,
-                    "boost" : 1.0
+          "time_range_pruner" : {
+            "min_timestamp" : 999700000,
+            "max_timestamp" : 1001000000,
+            "query" : {
+              "bool" : {
+                "filter" : [
+                  {
+                    "range" : {
+                      "timestamp_range" : {
+                        "from" : 999700000,
+                        "to" : 1001000000,
+                        "include_lower" : true,
+                        "include_upper" : false,
+                        "boost" : 1.0
+                      }
+                    }
+                  },
+                  {
+                    "terms" : {
+                      "labels" : [
+                        "service:logger"
+                      ],
+                      "boost" : 1.0
+                    }
+                  },
+                  {
+                    "terms" : {
+                      "labels" : [
+                        "name:attempts"
+                      ],
+                      "boost" : 1.0
+                    }
                   }
-                }
+                ],
+                "adjust_pure_negative" : true,
+                "boost" : 1.0
               }
-            ],
-            "adjust_pure_negative" : true,
+            },
             "boost" : 1.0
           }
         }
@@ -190,37 +225,44 @@
   "aggregations" : {
     "0" : {
       "filter" : {
-        "bool" : {
-          "filter" : [
-            {
-              "terms" : {
-                "labels" : [
-                  "service:logger"
-                ],
-                "boost" : 1.0
-              }
-            },
-            {
-              "terms" : {
-                "labels" : [
-                  "name:logs"
-                ],
-                "boost" : 1.0
-              }
-            },
-            {
-              "range" : {
-                "timestamp_range" : {
-                  "from" : 999700000,
-                  "to" : 1001000000,
-                  "include_lower" : true,
-                  "include_upper" : false,
-                  "boost" : 1.0
+        "time_range_pruner" : {
+          "min_timestamp" : 999700000,
+          "max_timestamp" : 1001000000,
+          "query" : {
+            "bool" : {
+              "filter" : [
+                {
+                  "range" : {
+                    "timestamp_range" : {
+                      "from" : 999700000,
+                      "to" : 1001000000,
+                      "include_lower" : true,
+                      "include_upper" : false,
+                      "boost" : 1.0
+                    }
+                  }
+                },
+                {
+                  "terms" : {
+                    "labels" : [
+                      "service:logger"
+                    ],
+                    "boost" : 1.0
+                  }
+                },
+                {
+                  "terms" : {
+                    "labels" : [
+                      "name:logs"
+                    ],
+                    "boost" : 1.0
+                  }
                 }
-              }
+              ],
+              "adjust_pure_negative" : true,
+              "boost" : 1.0
             }
-          ],
-          "adjust_pure_negative" : true,
+          },
           "boost" : 1.0
         }
       },
@@ -241,37 +283,44 @@
     },
     "2" : {
       "filter" : {
-        "bool" : {
-          "filter" : [
-            {
-              "terms" : {
-                "labels" : [
-                  "service:logger"
-                ],
-                "boost" : 1.0
-              }
-            },
-            {
-              "terms" : {
-                "labels" : [
-                  "name:attempts"
-                ],
-                "boost" : 1.0
-              }
-            },
-            {
-              "range" : {
-                "timestamp_range" : {
-                  "from" : 999700000,
-                  "to" : 1001000000,
-                  "include_lower" : true,
-                  "include_upper" : false,
-                  "boost" : 1.0
+        "time_range_pruner" : {
+          "min_timestamp" : 999700000,
+          "max_timestamp" : 1001000000,
+          "query" : {
+            "bool" : {
+              "filter" : [
+                {
+                  "range" : {
+                    "timestamp_range" : {
+                      "from" : 999700000,
+                      "to" : 1001000000,
+                      "include_lower" : true,
+                      "include_upper" : false,
+                      "boost" : 1.0
+                    }
+                  }
+                },
+                {
+                  "terms" : {
+                    "labels" : [
+                      "service:logger"
+                    ],
+                    "boost" : 1.0
+                  }
+                },
+                {
+                  "terms" : {
+                    "labels" : [
+                      "name:attempts"
+                    ],
+                    "boost" : 1.0
+                  }
                 }
-              }
+              ],
+              "adjust_pure_negative" : true,
+              "boost" : 1.0
             }
-          ],
-          "adjust_pure_negative" : true,
+          },
           "boost" : 1.0
         }
       },
@@ -292,39 +341,46 @@
     },
     "6" : {
       "filter" : {
-        "bool" : {
-          "filter" : [
-            {
-              "terms" : {
-                "labels" : [
-                  "service:logger"
-                ],
-                "boost" : 1.0
-              }
-            },
-            {
-              "range" : {
-                "timestamp_range" : {
-                  "from" : 999700000,
-                  "to" : 1001000000,
-                  "include_lower" : true,
-                  "include_upper" : false,
-                  "boost" : 1.0
+        "time_range_pruner" : {
+          "min_timestamp" : 999700000,
+          "max_timestamp" : 1001000000,
+          "query" : {
+            "bool" : {
+              "filter" : [
+                {
+                  "range" : {
+                    "timestamp_range" : {
+                      "from" : 999700000,
+                      "to" : 1001000000,
+                      "include_lower" : true,
+                      "include_upper" : false,
+                      "boost" : 1.0
+                    }
+                  }
+                },
+                {
+                  "terms" : {
+                    "labels" : [
+                      "service:logger"
+                    ],
+                    "boost" : 1.0
+                  }
                 }
-              }
+              ],
+              "must_not" : [
+                {
+                  "terms" : {
+                    "labels" : [
+                      "error_type:backoff"
+                    ],
+                    "boost" : 1.0
+                  }
+                }
+              ],
+              "adjust_pure_negative" : true,
+              "boost" : 1.0
             }
-          ],
-          "must_not" : [
-            {
-              "terms" : {
-                "labels" : [
-                  "error_type:backoff"
-                ],
-                "boost" : 1.0
-              }
-            }
-          ],
-          "adjust_pure_negative" : true,
+          },
           "boost" : 1.0
         }
       },
@@ -345,37 +401,44 @@
     },
     "8" : {
       "filter" : {
-        "bool" : {
-          "filter" : [
-            {
-              "terms" : {
-                "labels" : [
-                  "service:logger"
-                ],
-                "boost" : 1.0
-              }
-            },
-            {
-              "wildcard" : {
-                "labels" : {
-                  "wildcard" : "error_type:*",
-                  "boost" : 1.0
+        "time_range_pruner" : {
+          "min_timestamp" : 999700000,
+          "max_timestamp" : 1001000000,
+          "query" : {
+            "bool" : {
+              "filter" : [
+                {
+                  "range" : {
+                    "timestamp_range" : {
+                      "from" : 999700000,
+                      "to" : 1001000000,
+                      "include_lower" : true,
+                      "include_upper" : false,
+                      "boost" : 1.0
+                    }
+                  }
+                },
+                {
+                  "terms" : {
+                    "labels" : [
+                      "service:logger"
+                    ],
+                    "boost" : 1.0
+                  }
+                },
+                {
+                  "wildcard" : {
+                    "labels" : {
+                      "wildcard" : "error_type:*",
+                      "boost" : 1.0
+                    }
+                  }
                 }
-              }
-            },
-            {
-              "range" : {
-                "timestamp_range" : {
-                  "from" : 999700000,
-                  "to" : 1001000000,
-                  "include_lower" : true,
-                  "include_upper" : false,
-                  "boost" : 1.0
-                }
-              }
+              ],
+              "adjust_pure_negative" : true,
+              "boost" : 1.0
             }
-          ],
-          "adjust_pure_negative" : true,
+          },
           "boost" : 1.0
         }
       },
@@ -396,37 +459,44 @@
     },
     "16" : {
       "filter" : {
-        "bool" : {
-          "filter" : [
-            {
-              "terms" : {
-                "labels" : [
-                  "service:logger"
-                ],
-                "boost" : 1.0
-              }
-            },
-            {
-              "terms" : {
-                "labels" : [
-                  "name:attempts"
-                ],
-                "boost" : 1.0
-              }
-            },
-            {
-              "range" : {
-                "timestamp_range" : {
-                  "from" : 999700000,
-                  "to" : 1001000000,
-                  "include_lower" : true,
-                  "include_upper" : false,
-                  "boost" : 1.0
+        "time_range_pruner" : {
+          "min_timestamp" : 999700000,
+          "max_timestamp" : 1001000000,
+          "query" : {
+            "bool" : {
+              "filter" : [
+                {
+                  "range" : {
+                    "timestamp_range" : {
+                      "from" : 999700000,
+                      "to" : 1001000000,
+                      "include_lower" : true,
+                      "include_upper" : false,
+                      "boost" : 1.0
+                    }
+                  }
+                },
+                {
+                  "terms" : {
+                    "labels" : [
+                      "service:logger"
+                    ],
+                    "boost" : 1.0
+                  }
+                },
+                {
+                  "terms" : {
+                    "labels" : [
+                      "name:attempts"
+                    ],
+                    "boost" : 1.0
+                  }
                 }
-              }
+              ],
+              "adjust_pure_negative" : true,
+              "boost" : 1.0
             }
-          ],
-          "adjust_pure_negative" : true,
+          },
           "boost" : 1.0
         }
       },

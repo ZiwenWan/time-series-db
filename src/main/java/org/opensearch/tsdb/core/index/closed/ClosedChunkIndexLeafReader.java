@@ -51,7 +51,7 @@ public class ClosedChunkIndexLeafReader extends TSDBLeafReader {
     private final LabelStorageType labelStorageType;
 
     /**
-     * Constructs a ClosedChunkIndexLeafReader for accessing closed chunk data.
+     * Constructs a ClosedChunkIndexLeafReader for accessing closed chunk data, without pruning.
      *
      * @param inner the underlying LeafReader to wrap
      * @param labelStorageType the storage type configured for labels
@@ -59,6 +59,22 @@ public class ClosedChunkIndexLeafReader extends TSDBLeafReader {
      */
     public ClosedChunkIndexLeafReader(LeafReader inner, LabelStorageType labelStorageType) throws IOException {
         super(inner);
+        this.inner = inner;
+        this.labelStorageType = labelStorageType;
+    }
+
+    /**
+     * Constructs a ClosedChunkIndexLeafReader with time bounds metadata for pruning.
+     *
+     * @param inner the underlying LeafReader to wrap
+     * @param labelStorageType the storage type configured for labels
+     * @param minTimestamp minimum timestamp in this segment (from ClosedChunkIndex metadata)
+     * @param maxTimestamp maximum timestamp in this segment (from ClosedChunkIndex metadata)
+     * @throws IOException if an error occurs during initialization
+     */
+    public ClosedChunkIndexLeafReader(LeafReader inner, LabelStorageType labelStorageType, long minTimestamp, long maxTimestamp)
+        throws IOException {
+        super(inner, minTimestamp, maxTimestamp);
         this.inner = inner;
         this.labelStorageType = labelStorageType;
     }

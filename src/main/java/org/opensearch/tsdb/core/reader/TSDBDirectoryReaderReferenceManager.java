@@ -17,12 +17,14 @@ import org.opensearch.common.SuppressForbidden;
 import org.opensearch.common.lucene.index.OpenSearchDirectoryReader;
 import org.opensearch.core.index.shard.ShardId;
 import org.opensearch.tsdb.core.mapping.LabelStorageType;
+import org.opensearch.tsdb.core.index.ReaderManagerWithMetadata;
 import org.opensearch.tsdb.core.index.closed.ClosedChunkIndexManager;
 import org.opensearch.tsdb.core.index.live.MemChunkReader;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.LongSupplier;
 
 /**
  * Reference manager for TSDBDirectoryReader that handles initiation and refreshing of TSDBDirectoryReader instances.
@@ -35,12 +37,13 @@ public class TSDBDirectoryReaderReferenceManager extends ReferenceManager<OpenSe
 
     private static final Logger log = LogManager.getLogger(TSDBDirectoryReaderReferenceManager.class);
     private final ReaderManager liveSeriesIndexReaderManager;
+    private final LongSupplier minLiveTimestampSupplier;
     private final ClosedChunkIndexManager closedChunkIndexManager;
     private final MemChunkReader memChunkReader;
     private final LabelStorageType labelStorageType;
     private final ShardId shardId;
 
-    private volatile List<ReaderManager> closedChunkIndexReaderManagers;
+    private volatile List<ReaderManagerWithMetadata> closedChunkIndexReaderManagers;
 
     /**
      * Creates a new TSDBDirectoryReaderReferenceManager.
@@ -54,6 +57,7 @@ public class TSDBDirectoryReaderReferenceManager extends ReferenceManager<OpenSe
     // TODO : Pass in data structure to hold already mmaped chunks
     public TSDBDirectoryReaderReferenceManager(
         ReaderManager liveSeriesIndexReaderManager,
+        LongSupplier minLiveTimestampSupplier,
         ClosedChunkIndexManager closedChunkIndexManager,
         MemChunkReader memChunkReader,
         LabelStorageType labelStorageType,
@@ -61,44 +65,68 @@ public class TSDBDirectoryReaderReferenceManager extends ReferenceManager<OpenSe
     ) throws IOException {
 
         this.liveSeriesIndexReaderManager = liveSeriesIndexReaderManager;
+        this.minLiveTimestampSupplier = minLiveTimestampSupplier;
         this.closedChunkIndexManager = closedChunkIndexManager;
-        this.closedChunkIndexReaderManagers = closedChunkIndexManager.getReaderManagers();
+        this.closedChunkIndexReaderManagers = closedChunkIndexManager.getReaderManagersWithMetadata();
         this.memChunkReader = memChunkReader;
         this.labelStorageType = labelStorageType;
         this.shardId = shardId;
 
         // initiate the MDR here
         this.current = OpenSearchDirectoryReader.wrap(
-            creatNewTSDBDirectoryReader(liveSeriesIndexReaderManager, closedChunkIndexManager, memChunkReader, labelStorageType, 0L),
+            creatNewTSDBDirectoryReader(
+                liveSeriesIndexReaderManager,
+                minLiveTimestampSupplier,
+                closedChunkIndexManager,
+                memChunkReader,
+                labelStorageType,
+                0L
+            ),
             shardId
         );
     }
 
     private TSDBDirectoryReader creatNewTSDBDirectoryReader(
         ReaderManager liveSeriesIndexReaderManager,
+        LongSupplier minLiveTimestampSupplier,
         ClosedChunkIndexManager closedChunkIndexManager,
         MemChunkReader memchunkReader,
         LabelStorageType labelStorageType,
         long currentVersion
     ) throws IOException {
         // Collect all closed chunk index reader managers
-        List<ReaderManager> allClosedReaderManagers = closedChunkIndexManager.getReaderManagers();
+        // List<ReaderManager> allClosedReaderManagers = closedChunkIndexManager.getReaderManagers();
+        List<ReaderManagerWithMetadata> allClosedReaderManagers = closedChunkIndexManager.getReaderManagersWithMetadata();
 
         // Acquire DirectoryReader instances from all ReaderManagers
         DirectoryReader liveReader = null;
-        List<DirectoryReader> closedReaders = new ArrayList<>();
+        List<DirectoryReaderWithMetadata> closedReaders = new ArrayList<>();
 
         try {
             liveSeriesIndexReaderManager.maybeRefreshBlocking();
             liveReader = liveSeriesIndexReaderManager.acquire();
 
-            for (ReaderManager readerManager : allClosedReaderManagers) {
+            for (ReaderManagerWithMetadata readerManagerWithMetadata : allClosedReaderManagers) {
+                ReaderManager readerManager = readerManagerWithMetadata.readerMananger();
                 readerManager.maybeRefreshBlocking();
-                closedReaders.add(readerManager.acquire());
+                closedReaders.add(
+                    new DirectoryReaderWithMetadata(
+                        readerManager.acquire(),
+                        readerManagerWithMetadata.minTimestamp(),
+                        readerManagerWithMetadata.maxTimestamp()
+                    )
+                );
             }
 
             log.info("Refreshing closed reader managers, total readers: {}", closedReaders.size());
-            return new TSDBDirectoryReader(liveReader, closedReaders, memchunkReader, labelStorageType, currentVersion + 1);
+            return new TSDBDirectoryReader(
+                liveReader,
+                minLiveTimestampSupplier,
+                closedReaders,
+                memchunkReader,
+                labelStorageType,
+                currentVersion + 1
+            );
 
         } catch (IOException | AlreadyClosedException e) {
             log.error("Error creating TSDBDirectoryReader: ", e);
@@ -109,7 +137,7 @@ public class TSDBDirectoryReaderReferenceManager extends ReferenceManager<OpenSe
             }
             for (int i = 0; i < closedReaders.size(); i++) {
                 if (i < allClosedReaderManagers.size()) {
-                    allClosedReaderManagers.get(i).release(closedReaders.get(i));
+                    allClosedReaderManagers.get(i).readerMananger().release(closedReaders.get(i).reader());
                 }
             }
         }
@@ -132,13 +160,14 @@ public class TSDBDirectoryReaderReferenceManager extends ReferenceManager<OpenSe
      */
     @Override
     protected OpenSearchDirectoryReader refreshIfNeeded(OpenSearchDirectoryReader referenceToRefresh) throws IOException {
-        List<ReaderManager> currentReaderManagers = closedChunkIndexManager.getReaderManagers();
+        List<ReaderManagerWithMetadata> currentReaderManagers = closedChunkIndexManager.getReaderManagersWithMetadata();
 
         if (!this.closedChunkIndexReaderManagers.equals(currentReaderManagers)) {
             // Structural change detected - indexes were added or removed
             final OpenSearchDirectoryReader reader = OpenSearchDirectoryReader.wrap(
                 creatNewTSDBDirectoryReader(
                     liveSeriesIndexReaderManager,
+                    minLiveTimestampSupplier,
                     closedChunkIndexManager,
                     memChunkReader,
                     labelStorageType,
@@ -152,7 +181,6 @@ public class TSDBDirectoryReaderReferenceManager extends ReferenceManager<OpenSe
 
             log.info("Refreshed the tsdb directory reader");
             return reader;
-
         } else {
             log.info("No changes detected for refreshing the tsdb directory reader");
             // No structural change - attempt lightweight refresh

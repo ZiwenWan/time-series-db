@@ -4,76 +4,90 @@
     "bool" : {
       "should" : [
         {
-          "bool" : {
-            "filter" : [
-              {
-                "terms" : {
-                  "labels" : [
-                    "uuid:uuid-1",
-                    "uuid:uuid-2",
-                    "uuid:uuid-3"
-                  ],
-                  "boost" : 1.0
-                }
-              },
-              {
-                "wildcard" : {
-                  "labels" : {
-                    "wildcard" : "dc:sfo*",
-                    "boost" : 1.0
+          "time_range_pruner" : {
+            "min_timestamp" : 999940000,
+            "max_timestamp" : 1001000000,
+            "query" : {
+              "bool" : {
+                "filter" : [
+                  {
+                    "range" : {
+                      "timestamp_range" : {
+                        "from" : 999940000,
+                        "to" : 1001000000,
+                        "include_lower" : true,
+                        "include_upper" : false,
+                        "boost" : 1.0
+                      }
+                    }
+                  },
+                  {
+                    "terms" : {
+                      "labels" : [
+                        "uuid:uuid-1",
+                        "uuid:uuid-2",
+                        "uuid:uuid-3"
+                      ],
+                      "boost" : 1.0
+                    }
+                  },
+                  {
+                    "wildcard" : {
+                      "labels" : {
+                        "wildcard" : "dc:sfo*",
+                        "boost" : 1.0
+                      }
+                    }
                   }
-                }
-              },
-              {
-                "range" : {
-                  "timestamp_range" : {
-                    "from" : 999940000,
-                    "to" : 1001000000,
-                    "include_lower" : true,
-                    "include_upper" : false,
-                    "boost" : 1.0
-                  }
-                }
+                ],
+                "adjust_pure_negative" : true,
+                "boost" : 1.0
               }
-            ],
-            "adjust_pure_negative" : true,
+            },
             "boost" : 1.0
           }
         },
         {
-          "bool" : {
-            "filter" : [
-              {
-                "terms" : {
-                  "labels" : [
-                    "uuid:uuid-1",
-                    "uuid:uuid-2",
-                    "uuid:uuid-3"
-                  ],
-                  "boost" : 1.0
-                }
-              },
-              {
-                "wildcard" : {
-                  "labels" : {
-                    "wildcard" : "dc:sjc*",
-                    "boost" : 1.0
+          "time_range_pruner" : {
+            "min_timestamp" : 999940000,
+            "max_timestamp" : 1001000000,
+            "query" : {
+              "bool" : {
+                "filter" : [
+                  {
+                    "range" : {
+                      "timestamp_range" : {
+                        "from" : 999940000,
+                        "to" : 1001000000,
+                        "include_lower" : true,
+                        "include_upper" : false,
+                        "boost" : 1.0
+                      }
+                    }
+                  },
+                  {
+                    "terms" : {
+                      "labels" : [
+                        "uuid:uuid-1",
+                        "uuid:uuid-2",
+                        "uuid:uuid-3"
+                      ],
+                      "boost" : 1.0
+                    }
+                  },
+                  {
+                    "wildcard" : {
+                      "labels" : {
+                        "wildcard" : "dc:sjc*",
+                        "boost" : 1.0
+                      }
+                    }
                   }
-                }
-              },
-              {
-                "range" : {
-                  "timestamp_range" : {
-                    "from" : 999940000,
-                    "to" : 1001000000,
-                    "include_lower" : true,
-                    "include_upper" : false,
-                    "boost" : 1.0
-                  }
-                }
+                ],
+                "adjust_pure_negative" : true,
+                "boost" : 1.0
               }
-            ],
-            "adjust_pure_negative" : true,
+            },
             "boost" : 1.0
           }
         }
@@ -87,39 +101,46 @@
   "aggregations" : {
     "0" : {
       "filter" : {
-        "bool" : {
-          "filter" : [
-            {
-              "terms" : {
-                "labels" : [
-                  "uuid:uuid-1",
-                  "uuid:uuid-2",
-                  "uuid:uuid-3"
-                ],
-                "boost" : 1.0
-              }
-            },
-            {
-              "wildcard" : {
-                "labels" : {
-                  "wildcard" : "dc:sfo*",
-                  "boost" : 1.0
+        "time_range_pruner" : {
+          "min_timestamp" : 999940000,
+          "max_timestamp" : 1001000000,
+          "query" : {
+            "bool" : {
+              "filter" : [
+                {
+                  "range" : {
+                    "timestamp_range" : {
+                      "from" : 999940000,
+                      "to" : 1001000000,
+                      "include_lower" : true,
+                      "include_upper" : false,
+                      "boost" : 1.0
+                    }
+                  }
+                },
+                {
+                  "terms" : {
+                    "labels" : [
+                      "uuid:uuid-1",
+                      "uuid:uuid-2",
+                      "uuid:uuid-3"
+                    ],
+                    "boost" : 1.0
+                  }
+                },
+                {
+                  "wildcard" : {
+                    "labels" : {
+                      "wildcard" : "dc:sfo*",
+                      "boost" : 1.0
+                    }
+                  }
                 }
-              }
-            },
-            {
-              "range" : {
-                "timestamp_range" : {
-                  "from" : 999940000,
-                  "to" : 1001000000,
-                  "include_lower" : true,
-                  "include_upper" : false,
-                  "boost" : 1.0
-                }
-              }
+              ],
+              "adjust_pure_negative" : true,
+              "boost" : 1.0
             }
-          ],
-          "adjust_pure_negative" : true,
+          },
           "boost" : 1.0
         }
       },
@@ -143,39 +164,46 @@
     },
     "4" : {
       "filter" : {
-        "bool" : {
-          "filter" : [
-            {
-              "terms" : {
-                "labels" : [
-                  "uuid:uuid-1",
-                  "uuid:uuid-2",
-                  "uuid:uuid-3"
-                ],
-                "boost" : 1.0
-              }
-            },
-            {
-              "wildcard" : {
-                "labels" : {
-                  "wildcard" : "dc:sjc*",
-                  "boost" : 1.0
+        "time_range_pruner" : {
+          "min_timestamp" : 999940000,
+          "max_timestamp" : 1001000000,
+          "query" : {
+            "bool" : {
+              "filter" : [
+                {
+                  "range" : {
+                    "timestamp_range" : {
+                      "from" : 999940000,
+                      "to" : 1001000000,
+                      "include_lower" : true,
+                      "include_upper" : false,
+                      "boost" : 1.0
+                    }
+                  }
+                },
+                {
+                  "terms" : {
+                    "labels" : [
+                      "uuid:uuid-1",
+                      "uuid:uuid-2",
+                      "uuid:uuid-3"
+                    ],
+                    "boost" : 1.0
+                  }
+                },
+                {
+                  "wildcard" : {
+                    "labels" : {
+                      "wildcard" : "dc:sjc*",
+                      "boost" : 1.0
+                    }
+                  }
                 }
-              }
-            },
-            {
-              "range" : {
-                "timestamp_range" : {
-                  "from" : 999940000,
-                  "to" : 1001000000,
-                  "include_lower" : true,
-                  "include_upper" : false,
-                  "boost" : 1.0
-                }
-              }
+              ],
+              "adjust_pure_negative" : true,
+              "boost" : 1.0
             }
-          ],
-          "adjust_pure_negative" : true,
+          },
           "boost" : 1.0
         }
       },

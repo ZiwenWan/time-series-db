@@ -209,30 +209,42 @@ public class MemSeriesTests extends OpenSearchTestCase {
         MemSeries.ClosableChunkResult result = series.getClosableChunks(10000L);
         assertTrue(result.closableChunks().isEmpty());
         assertEquals(Long.MAX_VALUE, result.minSeqNo());
+        assertEquals(Long.MAX_VALUE, result.minTimestamp());
 
         // Creates 3 chunks: [0-8000], [8000-16000], [16000-24000]
+        // Samples: chunk0 has timestamps 0-7000, chunk1 has 8000-15000, chunk2 has 16000-23000
         series = createMemSeries(3);
 
-        // Cutoff before any chunk: none closable
+        // Cutoff before any chunk: none closable, all chunks are non-closable
+        // minTimestamp should be the minimum of all non-closable chunks = 0
         result = series.getClosableChunks(7999L);
         assertEquals(0, result.closableChunks().size());
         assertEquals(0, result.minSeqNo());
+        assertEquals(0L, result.minTimestamp());
 
-        // Cutoff at first chunk boundary: first chunk closable
+        // Cutoff at first chunk boundary: first chunk [0-8000] is closable
+        // Non-closable chunks: [8000-16000] and [16000-24000]
+        // minTimestamp of non-closable chunks = 8000
         result = series.getClosableChunks(8000L);
         assertEquals(1, result.closableChunks().size());
         assertEquals(8, result.minSeqNo());
+        assertEquals(8000L, result.minTimestamp());
 
         // Cutoff at second chunk boundary: first two chunks closable
+        // Non-closable chunk: [16000-24000]
+        // minTimestamp of non-closable chunks = 16000
         result = series.getClosableChunks(16000L);
         assertEquals(2, result.closableChunks().size());
         assertEquals(16, result.minSeqNo());
+        assertEquals(16000L, result.minTimestamp());
         assertFalse(result.closableChunks().contains(series.getHeadChunk()));
 
         // Cutoff at third chunk boundary: all chunks closable
+        // No non-closable chunks, so minTimestamp = Long.MAX_VALUE
         result = series.getClosableChunks(24000L);
         assertEquals(3, result.closableChunks().size());
         assertEquals(Long.MAX_VALUE, result.minSeqNo());
+        assertEquals(Long.MAX_VALUE, result.minTimestamp());
         assertTrue(result.closableChunks().contains(series.getHeadChunk()));
     }
 
@@ -242,19 +254,26 @@ public class MemSeriesTests extends OpenSearchTestCase {
         ChunkOptions options = new ChunkOptions(8000, 8);
 
         // Ingest with decreasing seqNo to test minSeqNo tracking
+        // Creates 2 chunks: [0-8000] and [8000-16000]
+        // Samples at: 0, 1000, 2000, ..., 11000
         for (int i = 12; i > 0; i--) {
             series.append(i, (12 - i) * 1000L, i * 10.0, options);
         }
 
         // Cutoff at first chunk: minSeqNo should be minimum of remaining chunks
+        // Closable: [0-8000], Non-closable: [8000-16000]
+        // minTimestamp of non-closable = 8000
         var result = series.getClosableChunks(8000L);
         assertEquals(1, result.closableChunks().size());
         assertEquals(1, result.minSeqNo());
+        assertEquals(8000L, result.minTimestamp());
 
         // Cutoff at second chunk: all chunks closable
+        // No non-closable chunks, minTimestamp = Long.MAX_VALUE
         result = series.getClosableChunks(16000L);
         assertEquals(2, result.closableChunks().size());
         assertEquals(Long.MAX_VALUE, result.minSeqNo());
+        assertEquals(Long.MAX_VALUE, result.minTimestamp());
     }
 
     public void testDropChunks() {

@@ -51,16 +51,36 @@ public class LiveSeriesIndexLeafReader extends TSDBLeafReader {
     // TODO : Add map Map<MemSeries, Set<MemChunk>> mappedChunks to reduce already mmaped chunks from results.
 
     /**
-     * Constructs a LiveSeriesIndexLeafReader that provides access to live time series data.
+     * Constructs a LiveSeriesIndexLeafReader that provides access to live time series data, with pruning based on minTimestamp
      *
      *
      * @param inner the underlying LeafReader to wrap
      * @param memChunkReader read memchunks given a reference
      * @param labelStorageType the storage type configured for labels
-     * @throws IOException if an error occurs during initialization
+     * @param minTimestamp miniumum timestamp of live samples at the time of reader creatio
      */
-    public LiveSeriesIndexLeafReader(LeafReader inner, MemChunkReader memChunkReader, LabelStorageType labelStorageType)
-        throws IOException {
+    public LiveSeriesIndexLeafReader(
+        LeafReader inner,
+        MemChunkReader memChunkReader,
+        LabelStorageType labelStorageType,
+        long minTimestamp
+    ) {
+        super(inner, minTimestamp, Long.MAX_VALUE);
+        this.inner = inner;
+        this.memChunkReader = memChunkReader;
+        this.labelStorageType = labelStorageType;
+        // TODO : Delete already mmapped chunks
+    }
+
+    /**
+     * Constructs a LiveSeriesIndexLeafReader that provides access to live time series data, without pruning.
+     *
+     *
+     * @param inner the underlying LeafReader to wrap
+     * @param memChunkReader read memchunks given a reference
+     * @param labelStorageType the storage type configured for labels
+     */
+    public LiveSeriesIndexLeafReader(LeafReader inner, MemChunkReader memChunkReader, LabelStorageType labelStorageType) {
         super(inner);
         this.inner = inner;
         this.memChunkReader = memChunkReader;

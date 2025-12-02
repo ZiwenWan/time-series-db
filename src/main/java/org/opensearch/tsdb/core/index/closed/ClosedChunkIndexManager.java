@@ -9,7 +9,6 @@ package org.opensearch.tsdb.core.index.closed;
 
 import org.apache.logging.log4j.Logger;
 import org.apache.lucene.index.IndexCommit;
-import org.apache.lucene.index.ReaderManager;
 import org.apache.lucene.index.SerialMergeScheduler;
 import org.apache.lucene.store.AlreadyClosedException;
 import org.opensearch.ExceptionsHelper;
@@ -32,6 +31,7 @@ import org.opensearch.tsdb.TSDBPlugin;
 import org.opensearch.tsdb.core.compaction.Compaction;
 import org.opensearch.tsdb.core.head.MemChunk;
 import org.opensearch.tsdb.core.head.MemSeries;
+import org.opensearch.tsdb.core.index.ReaderManagerWithMetadata;
 import org.opensearch.tsdb.core.model.Labels;
 import org.opensearch.tsdb.core.retention.Retention;
 import org.opensearch.tsdb.core.utils.Time;
@@ -631,16 +631,22 @@ public class ClosedChunkIndexManager implements Closeable {
     }
 
     /**
-     * Get all ReaderManagers for the closed chunk indexes.
-     *
-     * @return a list of ReaderManagers
+     * Get all ReaderManagers for all ClosedChunkIndexes, with metadata
+     * @return list of ReaderManagerWithMetadata, one for each ClosedChunkIndex
      */
-    public List<ReaderManager> getReaderManagers() {
+    public List<ReaderManagerWithMetadata> getReaderManagersWithMetadata() {
         lock.lock();
         try {
-            List<ReaderManager> readerManagers = new ArrayList<>();
+            List<ReaderManagerWithMetadata> readerManagers = new ArrayList<>();
             for (ClosedChunkIndex index : closedChunkIndexMap.values()) {
-                readerManagers.add(index.getDirectoryReaderManager());
+                ClosedChunkIndex.Metadata indexMetadata = index.getMetadata();
+                readerManagers.add(
+                    new ReaderManagerWithMetadata(
+                        index.getDirectoryReaderManager(),
+                        indexMetadata.minTimestamp(),
+                        indexMetadata.maxTimestamp()
+                    )
+                );
             }
             return readerManagers;
         } finally {

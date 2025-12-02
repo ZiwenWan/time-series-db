@@ -8,7 +8,6 @@
 package org.opensearch.tsdb.core.index.closed;
 
 import org.apache.lucene.index.IndexCommit;
-import org.apache.lucene.index.ReaderManager;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.core.index.shard.ShardId;
@@ -24,6 +23,7 @@ import org.opensearch.tsdb.core.chunk.ChunkIterator;
 import org.opensearch.tsdb.core.compaction.NoopCompaction;
 import org.opensearch.tsdb.core.compaction.SizeTieredCompaction;
 import org.opensearch.tsdb.core.head.MemSeries;
+import org.opensearch.tsdb.core.index.ReaderManagerWithMetadata;
 import org.opensearch.tsdb.core.model.ByteLabels;
 import org.opensearch.tsdb.core.model.Labels;
 import org.opensearch.tsdb.core.retention.NOOPRetention;
@@ -270,20 +270,20 @@ public class ClosedChunkIndexManagerTests extends OpenSearchTestCase {
             defaultSettings
         );
 
-        assertEquals("Initially no reader managers", 0, manager.getReaderManagers().size());
+        assertEquals("Initially no reader managers", 0, manager.getReaderManagersWithMetadata().size());
 
         Labels labels1 = ByteLabels.fromStrings("label1", "value1");
         MemSeries series1 = new MemSeries(0, labels1);
 
         manager.addMemChunk(series1, TestUtils.getMemChunk(5, 0, 1500));
-        assertEquals("One reader manager after first chunk", 1, manager.getReaderManagers().size());
+        assertEquals("One reader manager after first chunk", 1, manager.getReaderManagersWithMetadata().size());
 
         manager.addMemChunk(series1, TestUtils.getMemChunk(5, 7200000, 7800000));
-        assertEquals("Two reader managers after second chunk in different block", 2, manager.getReaderManagers().size());
+        assertEquals("Two reader managers after second chunk in different block", 2, manager.getReaderManagersWithMetadata().size());
 
-        List<ReaderManager> readerManagers = manager.getReaderManagers();
-        for (ReaderManager readerManager : readerManagers) {
-            assertNotNull("Reader manager should not be null", readerManager);
+        List<ReaderManagerWithMetadata> readerManagers = manager.getReaderManagersWithMetadata();
+        for (ReaderManagerWithMetadata readerManager : readerManagers) {
+            assertNotNull("Reader manager should not be null", readerManager.readerMananger());
         }
 
         manager.close();

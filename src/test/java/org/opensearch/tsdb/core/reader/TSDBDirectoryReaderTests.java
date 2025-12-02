@@ -35,9 +35,12 @@ import org.opensearch.common.SuppressForbidden;
 import org.opensearch.test.OpenSearchTestCase;
 import org.opensearch.tsdb.core.chunk.Encoding;
 import org.opensearch.tsdb.core.head.MemChunk;
+import org.opensearch.tsdb.core.index.ReaderManagerWithMetadata;
 import org.opensearch.tsdb.core.index.closed.ClosedChunkIndexIO;
+import org.opensearch.tsdb.core.index.closed.ClosedChunkIndexLeafReader;
 import org.opensearch.tsdb.core.index.closed.ClosedChunkIndexManager;
 import org.opensearch.tsdb.core.mapping.LabelStorageType;
+import org.opensearch.tsdb.core.index.live.LiveSeriesIndexLeafReader;
 import org.opensearch.tsdb.core.index.live.MemChunkReader;
 import org.junit.After;
 import org.junit.Before;
@@ -67,16 +70,17 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
     private Directory closedDirectory3;
     private IndexWriter liveWriter;
     private DirectoryReader liveReader;
-    private DirectoryReader closedReader1;
-    private DirectoryReader closedReader2;
-    private DirectoryReader closedReader3;
+    private DirectoryReaderWithMetadata closedReader1;
+    private DirectoryReaderWithMetadata closedReader2;
+    private DirectoryReaderWithMetadata closedReader3;
     private TSDBDirectoryReader tsdbDirectoryReader;
     private ClosedChunkIndexManager closedChunkIndexManager;
     private MemChunkReader memChunkReader;
-    private ReaderManager closedReaderManager1;
-    private ReaderManager closedReaderManager2;
-    private ReaderManager closedReaderManager3;
+    private ReaderManagerWithMetadata closedReaderManager1;
+    private ReaderManagerWithMetadata closedReaderManager2;
+    private ReaderManagerWithMetadata closedReaderManager3;
     private Map<Long, List<MemChunk>> referenceToMemChunkMap;
+    private LabelStorageType labelStorageType;
 
     @Before
     public void setUp() throws Exception {
@@ -131,14 +135,22 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
 
         // Open readers
         liveReader = DirectoryReader.open(liveWriter); // Create reader from IndexWriter for live updates
-        closedReader1 = DirectoryReader.open(closedDirectory1);
-        closedReader2 = DirectoryReader.open(closedDirectory2);
-        closedReader3 = DirectoryReader.open(closedDirectory3);
 
-        // Create ReaderManagers for closed readers
-        closedReaderManager1 = new ReaderManager(closedReader1);
-        closedReaderManager2 = new ReaderManager(closedReader2);
-        closedReaderManager3 = new ReaderManager(closedReader3);
+        // Create DirectoryReaderWithMetadata for closed readers with their time bounds
+        DirectoryReader rawClosedReader1 = DirectoryReader.open(closedDirectory1);
+        DirectoryReader rawClosedReader2 = DirectoryReader.open(closedDirectory2);
+        DirectoryReader rawClosedReader3 = DirectoryReader.open(closedDirectory3);
+
+        closedReader1 = new DirectoryReaderWithMetadata(rawClosedReader1, 1000000L, 2999999L);
+        closedReader2 = new DirectoryReaderWithMetadata(rawClosedReader2, 3000000L, 4999999L);
+        closedReader3 = new DirectoryReaderWithMetadata(rawClosedReader3, 5000000L, 7999999L);
+
+        // Create ReaderManagers for closed readers (using the underlying DirectoryReaders)
+        closedReaderManager1 = new ReaderManagerWithMetadata(new ReaderManager(rawClosedReader1), 1000000L, 2999999L);
+        closedReaderManager2 = new ReaderManagerWithMetadata(new ReaderManager(rawClosedReader2), 3000000L, 4999999L);
+        closedReaderManager3 = new ReaderManagerWithMetadata(new ReaderManager(rawClosedReader3), 5000000L, 7999999L);
+
+        labelStorageType = LabelStorageType.SORTED_SET;
     }
 
     @After
@@ -153,13 +165,13 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
             liveReader.close();
         }
         if (closedReader1 != null) {
-            closedReader1.close();
+            closedReader1.reader().close();
         }
         if (closedReader2 != null) {
-            closedReader2.close();
+            closedReader2.reader().close();
         }
         if (closedReader3 != null) {
-            closedReader3.close();
+            closedReader3.reader().close();
         }
         if (liveDirectory != null) {
             liveDirectory.close();
@@ -179,27 +191,111 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
     }
 
     @Test
+    public void testLeavesCreatedWithCorrectMetadataFromSupplierAndReaderMetadata() throws IOException {
+
+        long expectedMinLiveTimestamp = 99999L;
+        long expectedMinClosed1 = 1000000L;
+        long expectedMaxClosed1 = 2999999L;
+        long expectedMinClosed2 = 3000000L;
+        long expectedMaxClosed2 = 4999999L;
+        long expectedMinClosed3 = 5000000L;
+        long expectedMaxClosed3 = 7999999L;
+
+        tsdbDirectoryReader = new TSDBDirectoryReader(
+            liveReader,
+            () -> expectedMinLiveTimestamp,
+            Arrays.asList(closedReader1, closedReader2, closedReader3),
+            memChunkReader
+        );
+
+        // Leaves are ordered: live leaves, then closed1 leaves, then closed2 leaves, then closed3 leaves
+        List<LeafReaderContext> leaves = tsdbDirectoryReader.leaves();
+
+        int expectedLiveLeaves = liveReader.leaves().size();
+        int expectedClosed1Leaves = closedReader1.reader().leaves().size();
+        int expectedClosed2Leaves = closedReader2.reader().leaves().size();
+        int expectedClosed3Leaves = closedReader3.reader().leaves().size();
+        int expectedTotalLeaves = expectedLiveLeaves + expectedClosed1Leaves + expectedClosed2Leaves + expectedClosed3Leaves;
+
+        assertEquals("Total leaves should match sum of all reader leaves", expectedTotalLeaves, leaves.size());
+
+        int index = 0;
+
+        // Verify live leaves (first in order)
+        for (int i = 0; i < expectedLiveLeaves; i++) {
+            LeafReader leaf = leaves.get(i).reader();
+            assertTrue("Leaf at index " + index + " should be LiveSeriesIndexLeafReader", leaf instanceof LiveSeriesIndexLeafReader);
+            LiveSeriesIndexLeafReader liveLeaf = (LiveSeriesIndexLeafReader) leaf;
+            assertEquals(
+                "live leaf should have minTimestamp from minLiveTimestampSupplier",
+                expectedMinLiveTimestamp,
+                liveLeaf.getMinIndexTimestamp()
+            );
+            assertEquals("Live leaf should have Long.MAX_VALUE as maxTimestamp", Long.MAX_VALUE, liveLeaf.getMaxIndexTimestamp());
+            index++;
+        }
+
+        // Verify closedReader1 leaves (second in order)
+        for (int i = 0; i < expectedClosed1Leaves; i++) {
+            LeafReader leaf = leaves.get(index).reader();
+            assertTrue("Leaf at index " + index + " should be ClosedChunkIndexLeafReader", leaf instanceof ClosedChunkIndexLeafReader);
+            ClosedChunkIndexLeafReader closedLeaf = (ClosedChunkIndexLeafReader) leaf;
+            assertEquals("leaf should have minTimestamp from metadata", expectedMinClosed1, closedLeaf.getMinIndexTimestamp());
+            assertEquals("leaf should have maxTimestamp from metadata", expectedMaxClosed1, closedLeaf.getMaxIndexTimestamp());
+            index++;
+        }
+
+        // Verify closedReader2 leaves (third in order)
+        for (int i = 0; i < expectedClosed2Leaves; i++) {
+            LeafReader leaf = leaves.get(index).reader();
+            assertTrue("Leaf at index " + index + " should be ClosedChunkIndexLeafReader", leaf instanceof ClosedChunkIndexLeafReader);
+            ClosedChunkIndexLeafReader closedLeaf = (ClosedChunkIndexLeafReader) leaf;
+            assertEquals("leaf should have minTimestamp from metadata", expectedMinClosed2, closedLeaf.getMinIndexTimestamp());
+            assertEquals("leaf should have maxTimestamp from metadata", expectedMaxClosed2, closedLeaf.getMaxIndexTimestamp());
+            index++;
+        }
+
+        // Verify closedReader3 leaves (fourth in order)
+        for (int i = 0; i < expectedClosed3Leaves; i++) {
+            LeafReader leaf = leaves.get(index).reader();
+            assertTrue("Leaf at index " + index + " should be ClosedChunkIndexLeafReader", leaf instanceof ClosedChunkIndexLeafReader);
+            ClosedChunkIndexLeafReader closedLeaf = (ClosedChunkIndexLeafReader) leaf;
+            assertEquals("leaf should have minTimestamp from metadata", expectedMinClosed3, closedLeaf.getMinIndexTimestamp());
+            assertEquals("leaf should have maxTimestamp from metadata", expectedMaxClosed3, closedLeaf.getMaxIndexTimestamp());
+            index++;
+        }
+
+        // Verify all leaves were checked
+        assertEquals("All leaves should have been verified", expectedTotalLeaves, index);
+    }
+
+    @Test
     public void testConstructorWithSingleClosedReader() throws IOException {
         int initialLiveRefCount = liveReader.getRefCount();
-        int initialClosedRefCount = closedReader1.getRefCount();
+        int initialClosedRefCount = closedReader1.reader().getRefCount();
 
-        tsdbDirectoryReader = new TSDBDirectoryReader(liveReader, Arrays.asList(closedReader1), memChunkReader);
+        tsdbDirectoryReader = new TSDBDirectoryReader(liveReader, () -> 0L, Arrays.asList(closedReader1), memChunkReader);
 
         // Reference counts should be incremented by the constructor
         assertEquals("Live reader reference count should be incremented by 1", initialLiveRefCount + 1, liveReader.getRefCount());
-        assertEquals("Closed reader reference count should be incremented by 1", initialClosedRefCount + 1, closedReader1.getRefCount());
+        assertEquals(
+            "Closed reader reference count should be incremented by 1",
+            initialClosedRefCount + 1,
+            closedReader1.reader().getRefCount()
+        );
         assertEquals("Should have 1 closed chunk reader", 1, tsdbDirectoryReader.getClosedChunkReadersCount());
     }
 
     @Test
     public void testConstructorWithMultipleClosedReaders() throws IOException {
         int initialLiveRefCount = liveReader.getRefCount();
-        int initialClosed1RefCount = closedReader1.getRefCount();
-        int initialClosed2RefCount = closedReader2.getRefCount();
-        int initialClosed3RefCount = closedReader3.getRefCount();
+        int initialClosed1RefCount = closedReader1.reader().getRefCount();
+        int initialClosed2RefCount = closedReader2.reader().getRefCount();
+        int initialClosed3RefCount = closedReader3.reader().getRefCount();
 
         tsdbDirectoryReader = new TSDBDirectoryReader(
             liveReader,
+            () -> 0L,
             Arrays.asList(closedReader1, closedReader2, closedReader3),
             memChunkReader
         );
@@ -209,17 +305,17 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
         assertEquals(
             "First closed reader reference count should be incremented by 1",
             initialClosed1RefCount + 1,
-            closedReader1.getRefCount()
+            closedReader1.reader().getRefCount()
         );
         assertEquals(
             "Second closed reader reference count should be incremented by 1",
             initialClosed2RefCount + 1,
-            closedReader2.getRefCount()
+            closedReader2.reader().getRefCount()
         );
         assertEquals(
             "Third closed reader reference count should be incremented by 1",
             initialClosed3RefCount + 1,
-            closedReader3.getRefCount()
+            closedReader3.reader().getRefCount()
         );
         assertEquals("Should have 3 closed chunk readers", 3, tsdbDirectoryReader.getClosedChunkReadersCount());
     }
@@ -228,15 +324,16 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
     public void testLeavesCombination() throws IOException {
         tsdbDirectoryReader = new TSDBDirectoryReader(
             liveReader,
+            () -> 0L,
             Arrays.asList(closedReader1, closedReader2, closedReader3),
             memChunkReader
         );
 
         // Get expected leaf count
         int expectedLiveLeaves = liveReader.leaves().size();
-        int expectedClosed1Leaves = closedReader1.leaves().size();
-        int expectedClosed2Leaves = closedReader2.leaves().size();
-        int expectedClosed3Leaves = closedReader3.leaves().size();
+        int expectedClosed1Leaves = closedReader1.reader().leaves().size();
+        int expectedClosed2Leaves = closedReader2.reader().leaves().size();
+        int expectedClosed3Leaves = closedReader3.reader().leaves().size();
         int expectedTotalLeaves = expectedLiveLeaves + expectedClosed1Leaves + expectedClosed2Leaves + expectedClosed3Leaves;
 
         List<LeafReaderContext> actualLeaves = tsdbDirectoryReader.leaves();
@@ -248,11 +345,14 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
     public void testMaxDocCombination() throws IOException {
         tsdbDirectoryReader = new TSDBDirectoryReader(
             liveReader,
+            () -> 0L,
             Arrays.asList(closedReader1, closedReader2, closedReader3),
             memChunkReader
         );
 
-        int expectedMaxDoc = liveReader.maxDoc() + closedReader1.maxDoc() + closedReader2.maxDoc() + closedReader3.maxDoc();
+        int expectedMaxDoc = liveReader.maxDoc() + closedReader1.reader().maxDoc() + closedReader2.reader().maxDoc() + closedReader3
+            .reader()
+            .maxDoc();
         int actualMaxDoc = tsdbDirectoryReader.maxDoc();
 
         assertEquals("MaxDoc should be sum of all readers", expectedMaxDoc, actualMaxDoc);
@@ -262,11 +362,14 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
     public void testNumDocsCombination() throws IOException {
         tsdbDirectoryReader = new TSDBDirectoryReader(
             liveReader,
+            () -> 0L,
             Arrays.asList(closedReader1, closedReader2, closedReader3),
             memChunkReader
         );
 
-        int expectedNumDocs = liveReader.numDocs() + closedReader1.numDocs() + closedReader2.numDocs() + closedReader3.numDocs();
+        int expectedNumDocs = liveReader.numDocs() + closedReader1.reader().numDocs() + closedReader2.reader().numDocs() + closedReader3
+            .reader()
+            .numDocs();
         int actualNumDocs = tsdbDirectoryReader.numDocs();
 
         assertEquals("NumDocs should be sum of all readers", expectedNumDocs, actualNumDocs);
@@ -276,6 +379,7 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
     public void testVersionCombination() throws IOException {
         tsdbDirectoryReader = new TSDBDirectoryReader(
             liveReader,
+            () -> 0L,
             Arrays.asList(closedReader1, closedReader2, closedReader3),
             memChunkReader
         );
@@ -288,6 +392,7 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
         // Test with explicit version
         TSDBDirectoryReader versionedReader = new TSDBDirectoryReader(
             liveReader,
+            () -> 0L,
             Arrays.asList(closedReader1, closedReader2, closedReader3),
             memChunkReader,
             LabelStorageType.BINARY,
@@ -301,14 +406,15 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
     public void testIsCurrentCombination() throws IOException {
         tsdbDirectoryReader = new TSDBDirectoryReader(
             liveReader,
+            () -> 0L,
             Arrays.asList(closedReader1, closedReader2, closedReader3),
             memChunkReader
         );
 
         boolean expectedIsCurrent = liveReader.isCurrent()
-            && closedReader1.isCurrent()
-            && closedReader2.isCurrent()
-            && closedReader3.isCurrent();
+            && closedReader1.reader().isCurrent()
+            && closedReader2.reader().isCurrent()
+            && closedReader3.reader().isCurrent();
         boolean actualIsCurrent = tsdbDirectoryReader.isCurrent();
 
         assertEquals("IsCurrent should be AND of all readers", expectedIsCurrent, actualIsCurrent);
@@ -317,9 +423,9 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
     @Test
     public void testReferenceCountingOperations() throws IOException {
         int initialLiveRefCount = liveReader.getRefCount();
-        int initialClosed1RefCount = closedReader1.getRefCount();
-        int initialClosed2RefCount = closedReader2.getRefCount();
-        int initialClosed3RefCount = closedReader3.getRefCount();
+        int initialClosed1RefCount = closedReader1.reader().getRefCount();
+        int initialClosed2RefCount = closedReader2.reader().getRefCount();
+        int initialClosed3RefCount = closedReader3.reader().getRefCount();
 
         // Note : Ref count of MDR and the underlying readers are not necessarily matching because
         // The underlying readers ref counts are managed externally by their ReaderManagers.
@@ -332,6 +438,7 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
 
         tsdbDirectoryReader = new TSDBDirectoryReader(
             liveReader,
+            () -> 0L,
             Arrays.asList(closedReader1, closedReader2, closedReader3),
             memChunkReader
         );
@@ -340,17 +447,17 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
         assertEquals(
             "First closed reader reference count should be incremented by 1",
             initialClosed1RefCount + 1,
-            closedReader1.getRefCount()
+            closedReader1.reader().getRefCount()
         );
         assertEquals(
             "Second closed reader reference count should be incremented by 1",
             initialClosed2RefCount + 1,
-            closedReader2.getRefCount()
+            closedReader2.reader().getRefCount()
         );
         assertEquals(
             "Third closed reader reference count should be incremented by 1",
             initialClosed3RefCount + 1,
-            closedReader3.getRefCount()
+            closedReader3.reader().getRefCount()
         );
 
         // Test incRef
@@ -360,17 +467,17 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
         assertEquals(
             "First closed reader reference count should remain unchanged",
             initialClosed1RefCount + 1,
-            closedReader1.getRefCount()
+            closedReader1.reader().getRefCount()
         );
         assertEquals(
             "Second closed reader reference count should remain unchanged",
             initialClosed2RefCount + 1,
-            closedReader2.getRefCount()
+            closedReader2.reader().getRefCount()
         );
         assertEquals(
             "Third closed reader reference count should remain unchanged",
             initialClosed3RefCount + 1,
-            closedReader3.getRefCount()
+            closedReader3.reader().getRefCount()
         );
 
         // Test tryIncRef
@@ -385,29 +492,37 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
         assertEquals(
             "First closed reader reference count should remain unchanged",
             initialClosed1RefCount + 1,
-            closedReader1.getRefCount()
+            closedReader1.reader().getRefCount()
         );
         assertEquals(
             "Second closed reader reference count should remain unchanged",
             initialClosed2RefCount + 1,
-            closedReader2.getRefCount()
+            closedReader2.reader().getRefCount()
         );
         assertEquals(
             "Third closed reader reference count should remain unchanged",
             initialClosed3RefCount + 1,
-            closedReader3.getRefCount()
+            closedReader3.reader().getRefCount()
         );
 
         tsdbDirectoryReader.close();
         assertEquals("Reference count should be 0 after close", 0, tsdbDirectoryReader.getRefCount());
         assertEquals("Live reader reference count should be decremented by 1", initialLiveRefCount, liveReader.getRefCount());
-        assertEquals("First closed reader reference count should be decremented by 1", initialClosed1RefCount, closedReader1.getRefCount());
+        assertEquals(
+            "First closed reader reference count should be decremented by 1",
+            initialClosed1RefCount,
+            closedReader1.reader().getRefCount()
+        );
         assertEquals(
             "Second closed reader reference count should be decremented by 1",
             initialClosed2RefCount,
-            closedReader2.getRefCount()
+            closedReader2.reader().getRefCount()
         );
-        assertEquals("Third closed reader reference count should be decremented by 1", initialClosed3RefCount, closedReader3.getRefCount());
+        assertEquals(
+            "Third closed reader reference count should be decremented by 1",
+            initialClosed3RefCount,
+            closedReader3.reader().getRefCount()
+        );
         // Here the underlying readers can still have ref count > 0 because they are managed by their ReaderManagers
     }
 
@@ -415,12 +530,13 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
     public void testDoCloseWillDecrementUnderlyingReadersRefCount() {
         try {
             int initialLiveRefCount = liveReader.getRefCount();
-            int initialClosed1RefCount = closedReader1.getRefCount();
-            int initialClosed2RefCount = closedReader2.getRefCount();
-            int initialClosed3RefCount = closedReader3.getRefCount();
+            int initialClosed1RefCount = closedReader1.reader().getRefCount();
+            int initialClosed2RefCount = closedReader2.reader().getRefCount();
+            int initialClosed3RefCount = closedReader3.reader().getRefCount();
 
             tsdbDirectoryReader = new TSDBDirectoryReader(
                 liveReader,
+                () -> 0L,
                 Arrays.asList(closedReader1, closedReader2, closedReader3),
                 memChunkReader
             );
@@ -430,17 +546,17 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
             assertEquals(
                 "First closed reader ref count should be incremented by 1",
                 initialClosed1RefCount + 1,
-                closedReader1.getRefCount()
+                closedReader1.reader().getRefCount()
             );
             assertEquals(
                 "Second closed reader ref count should be incremented by 1",
                 initialClosed2RefCount + 1,
-                closedReader2.getRefCount()
+                closedReader2.reader().getRefCount()
             );
             assertEquals(
                 "Third closed reader ref count should be incremented by 1",
                 initialClosed3RefCount + 1,
-                closedReader3.getRefCount()
+                closedReader3.reader().getRefCount()
             );
 
             tsdbDirectoryReader.close();
@@ -454,17 +570,17 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
             assertEquals(
                 "First closed reader ref count should be back to initial value after TSDBDirectoryReader is closed",
                 initialClosed1RefCount,
-                closedReader1.getRefCount()
+                closedReader1.reader().getRefCount()
             );
             assertEquals(
                 "Second closed reader ref count should be back to initial value after TSDBDirectoryReader is closed",
                 initialClosed2RefCount,
-                closedReader2.getRefCount()
+                closedReader2.reader().getRefCount()
             );
             assertEquals(
                 "Third closed reader ref count should be back to initial value after TSDBDirectoryReader is closed",
                 initialClosed3RefCount,
-                closedReader3.getRefCount()
+                closedReader3.reader().getRefCount()
             );
         } catch (IOException e) {
             fail("IOException should not be thrown: " + e.getMessage());
@@ -474,12 +590,13 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
     @Test
     public void testDoOpenIfChangedWithNoChanges() throws IOException {
         // Set up mock to return the same reader managers that match the closed readers
-        when(closedChunkIndexManager.getReaderManagers()).thenReturn(
+        when(closedChunkIndexManager.getReaderManagersWithMetadata()).thenReturn(
             Arrays.asList(closedReaderManager1, closedReaderManager2, closedReaderManager3)
         );
 
         tsdbDirectoryReader = new TSDBDirectoryReader(
             liveReader,
+            () -> 0L,
             Arrays.asList(closedReader1, closedReader2, closedReader3),
             memChunkReader
         );
@@ -492,7 +609,7 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
 
     @Test
     public void testDoOpenIfChangedWithLiveIndexChanges() throws IOException {
-        tsdbDirectoryReader = new TSDBDirectoryReader(liveReader, Arrays.asList(closedReader1, closedReader2), memChunkReader);
+        tsdbDirectoryReader = new TSDBDirectoryReader(liveReader, () -> 0L, Arrays.asList(closedReader1, closedReader2), memChunkReader);
 
         // Verify initial document count
         int initialDocCount = tsdbDirectoryReader.numDocs();
@@ -538,25 +655,25 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
 
     @Test(expected = UnsupportedEncodingException.class)
     public void testDoOpenIfChangedWithIndexCommitThrowsException() throws IOException {
-        tsdbDirectoryReader = new TSDBDirectoryReader(liveReader, Arrays.asList(closedReader1), memChunkReader);
+        tsdbDirectoryReader = new TSDBDirectoryReader(liveReader, () -> 0L, Arrays.asList(closedReader1), memChunkReader);
         tsdbDirectoryReader.doOpenIfChanged(null); // IndexCommit parameter
     }
 
     @Test(expected = UnsupportedEncodingException.class)
     public void testDoOpenIfChangedWithIndexWriterThrowsException() throws IOException {
-        tsdbDirectoryReader = new TSDBDirectoryReader(liveReader, Arrays.asList(closedReader1), memChunkReader);
+        tsdbDirectoryReader = new TSDBDirectoryReader(liveReader, () -> 0L, Arrays.asList(closedReader1), memChunkReader);
         tsdbDirectoryReader.doOpenIfChanged(null, false); // IndexWriter parameter
     }
 
     @Test(expected = UnsupportedOperationException.class)
     public void testGetIndexCommitThrowsException() throws IOException {
-        tsdbDirectoryReader = new TSDBDirectoryReader(liveReader, Arrays.asList(closedReader1), memChunkReader);
+        tsdbDirectoryReader = new TSDBDirectoryReader(liveReader, () -> 0L, Arrays.asList(closedReader1), memChunkReader);
         tsdbDirectoryReader.getIndexCommit();
     }
 
     @Test
     public void testGetReaderCacheHelperReturnsNull() throws IOException {
-        tsdbDirectoryReader = new TSDBDirectoryReader(liveReader, Arrays.asList(closedReader1, closedReader2), memChunkReader);
+        tsdbDirectoryReader = new TSDBDirectoryReader(liveReader, () -> 0L, Arrays.asList(closedReader1, closedReader2), memChunkReader);
 
         assertNull("CacheHelper should return null", tsdbDirectoryReader.getReaderCacheHelper());
     }
@@ -565,6 +682,7 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
     public void testMultipleCloseCalls() throws IOException {
         tsdbDirectoryReader = new TSDBDirectoryReader(
             liveReader,
+            () -> 0L,
             Arrays.asList(closedReader1, closedReader2, closedReader3),
             memChunkReader
         );
@@ -575,9 +693,9 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
 
         // Verify underlying readers are only decremented once
         assertEquals("Live reader should only be decremented once", 1, liveReader.getRefCount());
-        assertEquals("First closed reader should only be decremented once", 1, closedReader1.getRefCount());
-        assertEquals("Second closed reader should only be decremented once", 1, closedReader2.getRefCount());
-        assertEquals("Third closed reader should only be decremented once", 1, closedReader3.getRefCount());
+        assertEquals("First closed reader should only be decremented once", 1, closedReader1.reader().getRefCount());
+        assertEquals("Second closed reader should only be decremented once", 1, closedReader2.reader().getRefCount());
+        assertEquals("Third closed reader should only be decremented once", 1, closedReader3.reader().getRefCount());
     }
 
     @Test
@@ -610,11 +728,19 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
         DirectoryReader emptyClosedReader2 = DirectoryReader.open(emptyClosedDirectory2);
         DirectoryReader emptyClosedReader3 = DirectoryReader.open(emptyClosedDirectory3);
 
+        // Wrap readers with metadata
+        DirectoryReaderWithMetadata emptyClosedMeta1 = new DirectoryReaderWithMetadata(emptyClosedReader1, 0L, 0L);
+        DirectoryReaderWithMetadata emptyClosedMeta2 = new DirectoryReaderWithMetadata(emptyClosedReader2, 0L, 0L);
+        DirectoryReaderWithMetadata emptyClosedMeta3 = new DirectoryReaderWithMetadata(emptyClosedReader3, 0L, 0L);
+
         try {
             TSDBDirectoryReader emptyMetricsReader = new TSDBDirectoryReader(
                 emptyLiveReader,
-                Arrays.asList(emptyClosedReader1, emptyClosedReader2, emptyClosedReader3),
-                memChunkReader
+                () -> 0L,
+                Arrays.asList(emptyClosedMeta1, emptyClosedMeta2, emptyClosedMeta3),
+                memChunkReader,
+                labelStorageType,
+                0L
             );
 
             assertEquals("Empty readers should have 0 documents", 0, emptyMetricsReader.numDocs());
@@ -637,7 +763,7 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
 
     @Test
     public void testConcurrentAccess() throws IOException {
-        tsdbDirectoryReader = new TSDBDirectoryReader(liveReader, Arrays.asList(closedReader1, closedReader2), memChunkReader);
+        tsdbDirectoryReader = new TSDBDirectoryReader(liveReader, () -> 0L, Arrays.asList(closedReader1, closedReader2), memChunkReader);
 
         // Test that multiple incRef/decRef operations work correctly
         List<Thread> threads = new ArrayList<>();
@@ -674,13 +800,13 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
         // They should have been incremented by 1 during construction
         // These assertions verify the underlying readers still have their incremented counts
         assertTrue("Live reader should have positive reference count", liveReader.getRefCount() > 0);
-        assertTrue("Closed reader 1 should have positive reference count", closedReader1.getRefCount() > 0);
-        assertTrue("Closed reader 2 should have positive reference count", closedReader2.getRefCount() > 0);
+        assertTrue("Closed reader 1 should have positive reference count", closedReader1.reader().getRefCount() > 0);
+        assertTrue("Closed reader 2 should have positive reference count", closedReader2.reader().getRefCount() > 0);
     }
 
     @Test
     public void testDirectory() throws IOException {
-        tsdbDirectoryReader = new TSDBDirectoryReader(liveReader, Arrays.asList(closedReader1, closedReader2), memChunkReader);
+        tsdbDirectoryReader = new TSDBDirectoryReader(liveReader, () -> 0L, Arrays.asList(closedReader1, closedReader2), memChunkReader);
 
         // The directory should be a CompositeDirectory
         assertNotNull("Directory should not be null", tsdbDirectoryReader.directory());
@@ -689,7 +815,7 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
 
     @Test
     public void testTryIncRefAfterClose() throws IOException {
-        tsdbDirectoryReader = new TSDBDirectoryReader(liveReader, Arrays.asList(closedReader1, closedReader2), memChunkReader);
+        tsdbDirectoryReader = new TSDBDirectoryReader(liveReader, () -> 0L, Arrays.asList(closedReader1, closedReader2), memChunkReader);
         tsdbDirectoryReader.close();
 
         // tryIncRef should return false for closed reader
@@ -700,6 +826,7 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
     public void testMatchAllDocsQueryWithThreeClosedReaders() throws IOException {
         tsdbDirectoryReader = new TSDBDirectoryReader(
             liveReader,
+            () -> 0L,
             Arrays.asList(closedReader1, closedReader2, closedReader3),
             memChunkReader
         );
@@ -714,7 +841,9 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
         // Verify the total number of hits
         // Expected: 2 live documents + 2 closed documents (first reader) + 2 closed documents (second reader) + 3 closed documents (third
         // reader) = 9 total
-        int expectedHits = liveReader.numDocs() + closedReader1.numDocs() + closedReader2.numDocs() + closedReader3.numDocs();
+        int expectedHits = liveReader.numDocs() + closedReader1.reader().numDocs() + closedReader2.reader().numDocs() + closedReader3
+            .reader()
+            .numDocs();
         assertEquals("MatchAllDocsQuery should return all documents from all readers", expectedHits, topDocs.totalHits.value());
         assertEquals("Should have 9 total documents", 9, topDocs.totalHits.value());
 
@@ -730,6 +859,7 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
     public void testGetClosedChunkReadersCountWithThreeReaders() throws IOException {
         tsdbDirectoryReader = new TSDBDirectoryReader(
             liveReader,
+            () -> 0L,
             Arrays.asList(closedReader1, closedReader2, closedReader3),
             memChunkReader
         );
@@ -741,6 +871,7 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
         // Test the duplicate chunk scenario where both live and closed indexes contain chunks for the same time range
         tsdbDirectoryReader = new TSDBDirectoryReader(
             liveReader,
+            () -> 0L,
             Arrays.asList(closedReader1, closedReader2, closedReader3),
             memChunkReader
         );
@@ -779,7 +910,7 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
         // This test verifies that the doClose method properly handles multiple readers
         // and that it can complete successfully under normal conditions
 
-        tsdbDirectoryReader = new TSDBDirectoryReader(liveReader, Arrays.asList(closedReader1, closedReader2), memChunkReader);
+        tsdbDirectoryReader = new TSDBDirectoryReader(liveReader, () -> 0L, Arrays.asList(closedReader1, closedReader2), memChunkReader);
 
         // Verify initial state
         assertEquals("Should have reference count of 1", 1, tsdbDirectoryReader.getRefCount());
@@ -792,8 +923,8 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
 
         // Verify underlying readers are properly decremented
         assertEquals("Live reader should have original ref count", 1, liveReader.getRefCount());
-        assertEquals("Closed reader 1 should have original ref count", 1, closedReader1.getRefCount());
-        assertEquals("Closed reader 2 should have original ref count", 1, closedReader2.getRefCount());
+        assertEquals("Closed reader 1 should have original ref count", 1, closedReader1.reader().getRefCount());
+        assertEquals("Closed reader 2 should have original ref count", 1, closedReader2.reader().getRefCount());
 
         // Multiple close calls should be safe
         tsdbDirectoryReader.close(); // Should not throw exception
@@ -810,12 +941,12 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
      */
     @Test
     public void testDoOpenIfChangedSuccessPath() throws IOException {
-        tsdbDirectoryReader = new TSDBDirectoryReader(liveReader, Arrays.asList(closedReader1, closedReader2), memChunkReader);
+        tsdbDirectoryReader = new TSDBDirectoryReader(liveReader, () -> 0L, Arrays.asList(closedReader1, closedReader2), memChunkReader);
 
         // Record initial refCounts
         int initialLiveRefCount = liveReader.getRefCount();
-        int initialClosed1RefCount = closedReader1.getRefCount();
-        int initialClosed2RefCount = closedReader2.getRefCount();
+        int initialClosed1RefCount = closedReader1.reader().getRefCount();
+        int initialClosed2RefCount = closedReader2.reader().getRefCount();
 
         // Add a document to trigger a change
         liveWriter.addDocument(getLiveDoc("service=test,env=dev", 1004L, 4000000L, 4999999L));
@@ -836,8 +967,8 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
         // Verify original readers' refCounts are unchanged
         // The new reader uses new DirectoryReader instances, not the original ones
         assertEquals("Live reader refCount should be unchanged", initialLiveRefCount, liveReader.getRefCount());
-        assertEquals("Closed1 reader refCount should match initial", initialClosed1RefCount, closedReader1.getRefCount());
-        assertEquals("Closed2 reader refCount should match initial", initialClosed2RefCount, closedReader2.getRefCount());
+        assertEquals("Closed1 reader refCount should match initial", initialClosed1RefCount, closedReader1.reader().getRefCount());
+        assertEquals("Closed2 reader refCount should match initial", initialClosed2RefCount, closedReader2.reader().getRefCount());
     }
 
     /**
@@ -913,13 +1044,19 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
      */
     @Test
     public void testDoOpenIfChangedErrorHandlingWithThrowingReader() throws IOException {
-        ThrowingOnRefreshDirectoryReader throwingClosedChunkReader1 = new ThrowingOnRefreshDirectoryReader(closedReader1);
-        ThrowingOnRefreshDirectoryReader throwingClosedChunkReader2 = new ThrowingOnRefreshDirectoryReader(closedReader2);
+        ThrowingOnRefreshDirectoryReader throwingClosedChunkReader1 = new ThrowingOnRefreshDirectoryReader(closedReader1.reader());
+        ThrowingOnRefreshDirectoryReader throwingClosedChunkReader2 = new ThrowingOnRefreshDirectoryReader(closedReader2.reader());
 
         tsdbDirectoryReader = new TSDBDirectoryReader(
             liveReader,
-            Arrays.asList(throwingClosedChunkReader1, throwingClosedChunkReader2),
-            memChunkReader
+            () -> 0L,
+            Arrays.asList(
+                new DirectoryReaderWithMetadata(throwingClosedChunkReader1, 0L, 0L),
+                new DirectoryReaderWithMetadata(throwingClosedChunkReader2, 0L, 0L)
+            ),
+            memChunkReader,
+            labelStorageType,
+            0L
         );
 
         int initialLiveRefCount = liveReader.getRefCount();
@@ -977,13 +1114,13 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
      */
     @Test
     public void testDoOpenIfChangedProperlyDecRefsNewReaders() throws IOException {
-        tsdbDirectoryReader = new TSDBDirectoryReader(liveReader, Arrays.asList(closedReader1, closedReader2), memChunkReader);
+        tsdbDirectoryReader = new TSDBDirectoryReader(liveReader, () -> 0L, Arrays.asList(closedReader1, closedReader2), memChunkReader);
 
         // Capture initial reference counts before refresh
         DirectoryReader initialLiveReader = liveReader;
         int initialLiveReaderRefCount = initialLiveReader.getRefCount();
-        int initialClosed1RefCount = closedReader1.getRefCount();
-        int initialClosed2RefCount = closedReader2.getRefCount();
+        int initialClosed1RefCount = closedReader1.reader().getRefCount();
+        int initialClosed2RefCount = closedReader2.reader().getRefCount();
 
         // Modify live index to trigger refresh
         liveWriter.addDocument(getLiveDoc("service=newservice,env=prod", 2001L, 8000000L, 8999999L));
@@ -1001,6 +1138,7 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
             java.lang.reflect.Field liveReaderField = TSDBDirectoryReader.class.getDeclaredField("liveSeriesIndexDirectoryReader");
             liveReaderField.setAccessible(true);
             DirectoryReader newLiveReader = (DirectoryReader) liveReaderField.get(changedMetricsReader);
+            // DirectoryReader newLiveReader = newLiveReaderWithMetadata.reader();
 
             assertNotNull("New live reader should not be null", newLiveReader);
             assertNotSame("New live reader should be different from old", initialLiveReader, newLiveReader);
@@ -1015,8 +1153,16 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
             initialLiveReaderRefCount,
             initialLiveReader.getRefCount()
         );
-        assertEquals("Closed reader 1 refCount incremented (reused by both MDRs)", initialClosed1RefCount + 1, closedReader1.getRefCount());
-        assertEquals("Closed reader 2 refCount incremented (reused by both MDRs)", initialClosed2RefCount + 1, closedReader2.getRefCount());
+        assertEquals(
+            "Closed reader 1 refCount incremented (reused by both MDRs)",
+            initialClosed1RefCount + 1,
+            closedReader1.reader().getRefCount()
+        );
+        assertEquals(
+            "Closed reader 2 refCount incremented (reused by both MDRs)",
+            initialClosed2RefCount + 1,
+            closedReader2.reader().getRefCount()
+        );
 
         // Close old MDR and verify reference counts
         tsdbDirectoryReader.close();
@@ -1026,8 +1172,16 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
             initialLiveReaderRefCount - 1,
             initialLiveReader.getRefCount()
         );
-        assertEquals("Closed reader 1 refCount back to initial after old MDR closed", initialClosed1RefCount, closedReader1.getRefCount());
-        assertEquals("Closed reader 2 refCount back to initial after old MDR closed", initialClosed2RefCount, closedReader2.getRefCount());
+        assertEquals(
+            "Closed reader 1 refCount back to initial after old MDR closed",
+            initialClosed1RefCount,
+            closedReader1.reader().getRefCount()
+        );
+        assertEquals(
+            "Closed reader 2 refCount back to initial after old MDR closed",
+            initialClosed2RefCount,
+            closedReader2.reader().getRefCount()
+        );
 
         // Close new MDR and verify final cleanup
         changedMetricsReader.close();
@@ -1035,12 +1189,12 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
         assertEquals(
             "Closed reader 1 refCount back to initial - 1 after both MDRs closed",
             initialClosed1RefCount - 1,
-            closedReader1.getRefCount()
+            closedReader1.reader().getRefCount()
         );
         assertEquals(
             "Closed reader 2 refCount back to initial - 1 after both MDRs closed",
             initialClosed2RefCount - 1,
-            closedReader2.getRefCount()
+            closedReader2.reader().getRefCount()
         );
 
         tsdbDirectoryReader = null;
@@ -1052,16 +1206,16 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
      */
     @Test
     public void testDoOpenIfChangedProperlyDecRefsNewClosedChunkReaders() throws IOException {
-        tsdbDirectoryReader = new TSDBDirectoryReader(liveReader, Arrays.asList(closedReader1, closedReader2), memChunkReader);
+        tsdbDirectoryReader = new TSDBDirectoryReader(liveReader, () -> 0L, Arrays.asList(closedReader1, closedReader2), memChunkReader);
 
         // Capture initial reference counts before refresh
-        DirectoryReader initialClosedReader1 = closedReader1;
+        DirectoryReader initialClosedReader1 = closedReader1.reader();
         int initialLiveRefCount = liveReader.getRefCount();
         int initialClosed1RefCount = initialClosedReader1.getRefCount();
-        int initialClosed2RefCount = closedReader2.getRefCount();
+        int initialClosed2RefCount = closedReader2.reader().getRefCount();
 
         // Modify closed chunk index 1 to trigger refresh
-        IndexWriter closedWriter1 = new IndexWriter(closedReader1.directory(), new IndexWriterConfig(new WhitespaceAnalyzer()));
+        IndexWriter closedWriter1 = new IndexWriter(closedReader1.reader().directory(), new IndexWriterConfig(new WhitespaceAnalyzer()));
         closedWriter1.addDocument(getClosedDoc("service=newservice,env=test", 1500000L, 1599999L));
         closedWriter1.commit();
         closedWriter1.close();
@@ -1075,15 +1229,17 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
 
         // Core assertion: Verify new closed chunk reader 1 has refCount=1 (owned only by new MDR)
         try {
-            java.lang.reflect.Field closedReadersField = TSDBDirectoryReader.class.getDeclaredField("closedChunkIndexDirectoryReaders");
+            java.lang.reflect.Field closedReadersField = TSDBDirectoryReader.class.getDeclaredField("closedChunkIndexReadersWithMetadata");
             closedReadersField.setAccessible(true);
             @SuppressWarnings("unchecked")
-            List<DirectoryReader> newClosedReaders = (List<DirectoryReader>) closedReadersField.get(changedMetricsReader);
+            List<DirectoryReaderWithMetadata> newClosedReaders = (List<DirectoryReaderWithMetadata>) closedReadersField.get(
+                changedMetricsReader
+            );
 
             assertNotNull("New closed readers list should not be null", newClosedReaders);
             assertEquals("Should have 2 closed chunk readers", 2, newClosedReaders.size());
 
-            DirectoryReader newClosedReader1 = newClosedReaders.get(0);
+            DirectoryReader newClosedReader1 = newClosedReaders.getFirst().reader();
             assertNotNull("New closed reader 1 should not be null", newClosedReader1);
             assertNotSame("New closed reader 1 should be different from old", initialClosedReader1, newClosedReader1);
             assertEquals("New closed reader 1 refCount should be 1 (owned only by new MDR)", 1, newClosedReader1.getRefCount());
@@ -1098,7 +1254,11 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
             initialClosedReader1.getRefCount()
         );
         assertEquals("Live reader refCount incremented (reused by both MDRs)", initialLiveRefCount + 1, liveReader.getRefCount());
-        assertEquals("Closed reader 2 refCount incremented (reused by both MDRs)", initialClosed2RefCount + 1, closedReader2.getRefCount());
+        assertEquals(
+            "Closed reader 2 refCount incremented (reused by both MDRs)",
+            initialClosed2RefCount + 1,
+            closedReader2.reader().getRefCount()
+        );
 
         // Close old MDR and verify reference counts
         tsdbDirectoryReader.close();
@@ -1109,7 +1269,11 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
             initialClosedReader1.getRefCount()
         );
         assertEquals("Live reader refCount back to initial after old MDR closed", initialLiveRefCount, liveReader.getRefCount());
-        assertEquals("Closed reader 2 refCount back to initial after old MDR closed", initialClosed2RefCount, closedReader2.getRefCount());
+        assertEquals(
+            "Closed reader 2 refCount back to initial after old MDR closed",
+            initialClosed2RefCount,
+            closedReader2.reader().getRefCount()
+        );
 
         // Close new MDR and verify final cleanup
         changedMetricsReader.close();
@@ -1118,7 +1282,7 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
         assertEquals(
             "Closed reader 2 refCount back to initial - 1 after both MDRs closed",
             initialClosed2RefCount - 1,
-            closedReader2.getRefCount()
+            closedReader2.reader().getRefCount()
         );
 
         tsdbDirectoryReader = null;
@@ -1130,13 +1294,19 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
      */
     @Test
     public void testDoOpenIfChangedErrorHandlingWhenLiveReaderUnchanged() throws IOException {
-        ThrowingOnRefreshDirectoryReader throwingClosedChunkReader1 = new ThrowingOnRefreshDirectoryReader(closedReader1);
-        ThrowingOnRefreshDirectoryReader throwingClosedChunkReader2 = new ThrowingOnRefreshDirectoryReader(closedReader2);
+        ThrowingOnRefreshDirectoryReader throwingClosedChunkReader1 = new ThrowingOnRefreshDirectoryReader(closedReader1.reader());
+        ThrowingOnRefreshDirectoryReader throwingClosedChunkReader2 = new ThrowingOnRefreshDirectoryReader(closedReader2.reader());
 
         tsdbDirectoryReader = new TSDBDirectoryReader(
             liveReader,
-            Arrays.asList(throwingClosedChunkReader1, throwingClosedChunkReader2),
-            memChunkReader
+            () -> 0L,
+            Arrays.asList(
+                new DirectoryReaderWithMetadata(throwingClosedChunkReader1, 0L, 0L),
+                new DirectoryReaderWithMetadata(throwingClosedChunkReader2, 0L, 0L)
+            ),
+            memChunkReader,
+            labelStorageType,
+            0L
         );
 
         int initialLiveRefCount = liveReader.getRefCount();
@@ -1265,19 +1435,25 @@ public class TSDBDirectoryReaderTests extends OpenSearchTestCase {
     @Test
     public void testDoOpenIfChangedSuppressedExceptionHandling() throws IOException {
         ThrowingOnCloseDirectoryReader throwingLiveReader = new ThrowingOnCloseDirectoryReader(liveReader);
-        ThrowingOnCloseDirectoryReader throwingClosedChunkReader1 = new ThrowingOnCloseDirectoryReader(closedReader1);
-        ThrowingOnRefreshDirectoryReader throwingClosedChunkReader2 = new ThrowingOnRefreshDirectoryReader(closedReader2);
+        ThrowingOnCloseDirectoryReader throwingClosedChunkReader1 = new ThrowingOnCloseDirectoryReader(closedReader1.reader());
+        ThrowingOnRefreshDirectoryReader throwingClosedChunkReader2 = new ThrowingOnRefreshDirectoryReader(closedReader2.reader());
 
         tsdbDirectoryReader = new TSDBDirectoryReader(
             throwingLiveReader,
-            Arrays.asList(throwingClosedChunkReader1, throwingClosedChunkReader2),
-            memChunkReader
+            () -> 0L,
+            Arrays.asList(
+                new DirectoryReaderWithMetadata(throwingClosedChunkReader1, 0L, 0L),
+                new DirectoryReaderWithMetadata(throwingClosedChunkReader2, 0L, 0L)
+            ),
+            memChunkReader,
+            labelStorageType,
+            0L
         );
 
         liveWriter.addDocument(getLiveDoc("service=test,env=dev", 1004L, 4000000L, 4999999L));
         liveWriter.commit();
 
-        IndexWriter writer1 = new IndexWriter(closedReader1.directory(), new IndexWriterConfig(new WhitespaceAnalyzer()));
+        IndexWriter writer1 = new IndexWriter(closedReader1.reader().directory(), new IndexWriterConfig(new WhitespaceAnalyzer()));
         writer1.addDocument(getClosedDoc("service=test", 100L, 200L));
         writer1.commit();
         writer1.close();

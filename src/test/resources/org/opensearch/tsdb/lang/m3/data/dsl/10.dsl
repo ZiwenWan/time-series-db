@@ -1,46 +1,53 @@
 {
   "size" : 0,
   "query" : {
-    "bool" : {
-      "filter" : [
-        {
-          "terms" : {
-            "labels" : [
-              "service:web-api"
-            ],
-            "boost" : 1.0
-          }
-        },
-        {
-          "terms" : {
-            "labels" : [
-              "name:requests_total"
-            ],
-            "boost" : 1.0
-          }
-        },
-        {
-          "terms" : {
-            "labels" : [
-              "region:us-east",
-              "region:us-west"
-            ],
-            "boost" : 1.0
-          }
-        },
-        {
-          "range" : {
-            "timestamp_range" : {
-              "from" : 1000000000,
-              "to" : 1001000000,
-              "include_lower" : true,
-              "include_upper" : false,
-              "boost" : 1.0
+    "time_range_pruner" : {
+      "min_timestamp" : 1000000000,
+      "max_timestamp" : 1001000000,
+      "query" : {
+        "bool" : {
+          "filter" : [
+            {
+              "range" : {
+                "timestamp_range" : {
+                  "from" : 1000000000,
+                  "to" : 1001000000,
+                  "include_lower" : true,
+                  "include_upper" : false,
+                  "boost" : 1.0
+                }
+              }
+            },
+            {
+              "terms" : {
+                "labels" : [
+                  "service:web-api"
+                ],
+                "boost" : 1.0
+              }
+            },
+            {
+              "terms" : {
+                "labels" : [
+                  "name:requests_total"
+                ],
+                "boost" : 1.0
+              }
+            },
+            {
+              "terms" : {
+                "labels" : [
+                  "region:us-east",
+                  "region:us-west"
+                ],
+                "boost" : 1.0
+              }
             }
-          }
+          ],
+          "adjust_pure_negative" : true,
+          "boost" : 1.0
         }
-      ],
-      "adjust_pure_negative" : true,
+      },
       "boost" : 1.0
     }
   },

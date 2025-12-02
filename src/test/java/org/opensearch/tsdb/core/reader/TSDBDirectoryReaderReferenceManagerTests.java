@@ -26,11 +26,13 @@ import org.opensearch.common.lucene.index.OpenSearchDirectoryReader;
 import org.opensearch.core.index.shard.ShardId;
 import org.opensearch.test.OpenSearchTestCase;
 import org.opensearch.tsdb.core.head.MemChunk;
+import org.opensearch.tsdb.core.index.ReaderManagerWithMetadata;
 import org.opensearch.tsdb.core.index.closed.ClosedChunkIndexManager;
 import org.opensearch.tsdb.core.index.live.MemChunkReader;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.opensearch.tsdb.core.mapping.LabelStorageType;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -58,14 +60,15 @@ public class TSDBDirectoryReaderReferenceManagerTests extends OpenSearchTestCase
     private DirectoryReader closedReader2;
     private DirectoryReader closedReader3;
     private ReaderManager liveReaderManager;
-    private ReaderManager closedReaderManager1;
-    private ReaderManager closedReaderManager2;
-    private ReaderManager closedReaderManager3;
+    private ReaderManagerWithMetadata closedReaderManager1;
+    private ReaderManagerWithMetadata closedReaderManager2;
+    private ReaderManagerWithMetadata closedReaderManager3;
     private ClosedChunkIndexManager closedChunkIndexManager;
     private MemChunkReader memChunkReader;
     private ShardId shardId;
     private TSDBDirectoryReaderReferenceManager referenceManager;
     private List<MemChunk> memChunks;
+    private LabelStorageType labelStorageType;
 
     @Before
     public void setUp() throws Exception {
@@ -98,12 +101,14 @@ public class TSDBDirectoryReaderReferenceManagerTests extends OpenSearchTestCase
 
         // Create ReaderManagers
         liveReaderManager = new ReaderManager(liveReader);
-        closedReaderManager1 = new ReaderManager(closedReader1);
-        closedReaderManager2 = new ReaderManager(closedReader2);
-        closedReaderManager3 = new ReaderManager(closedReader3);
+        closedReaderManager1 = new ReaderManagerWithMetadata(new ReaderManager(closedReader1), 1000000L, 1999999L);
+        closedReaderManager2 = new ReaderManagerWithMetadata(new ReaderManager(closedReader2), 2000000L, 2999999L);
+        closedReaderManager3 = new ReaderManagerWithMetadata(new ReaderManager(closedReader3), 3000000L, 3999999L);
 
         // Mock ClosedChunkIndexManager
         closedChunkIndexManager = mock(ClosedChunkIndexManager.class);
+
+        labelStorageType = LabelStorageType.BINARY;
     }
 
     private void setupLiveIndex() throws IOException {
@@ -155,13 +160,13 @@ public class TSDBDirectoryReaderReferenceManagerTests extends OpenSearchTestCase
             liveReaderManager.close();
         }
         if (closedReaderManager1 != null) {
-            closedReaderManager1.close();
+            closedReaderManager1.readerMananger().close();
         }
         if (closedReaderManager2 != null) {
-            closedReaderManager2.close();
+            closedReaderManager2.readerMananger().close();
         }
         if (closedReaderManager3 != null) {
-            closedReaderManager3.close();
+            closedReaderManager3.readerMananger().close();
         }
         if (liveWriter != null) {
             liveWriter.close();
@@ -196,14 +201,15 @@ public class TSDBDirectoryReaderReferenceManagerTests extends OpenSearchTestCase
     @Test
     public void testBasicInitializationWithExistingIndices() throws IOException {
         // Mock ClosedChunkIndexManager to return initial set of reader managers
-        when(closedChunkIndexManager.getReaderManagers()).thenReturn(Arrays.asList(closedReaderManager1, closedReaderManager2));
+        when(closedChunkIndexManager.getReaderManagersWithMetadata()).thenReturn(Arrays.asList(closedReaderManager1, closedReaderManager2));
 
         // Create TSDBDirectoryReaderReferenceManager
         referenceManager = new TSDBDirectoryReaderReferenceManager(
             liveReaderManager,
+            () -> 0L,
             closedChunkIndexManager,
             memChunkReader,
-            org.opensearch.tsdb.core.mapping.LabelStorageType.BINARY,
+            labelStorageType,
             shardId
         );
 
@@ -232,13 +238,14 @@ public class TSDBDirectoryReaderReferenceManagerTests extends OpenSearchTestCase
     @Test
     public void testRefreshWhenClosedChunkIndicesAdded() throws IOException {
         // Start with 2 closed indices
-        when(closedChunkIndexManager.getReaderManagers()).thenReturn(Arrays.asList(closedReaderManager1, closedReaderManager2));
+        when(closedChunkIndexManager.getReaderManagersWithMetadata()).thenReturn(Arrays.asList(closedReaderManager1, closedReaderManager2));
 
         referenceManager = new TSDBDirectoryReaderReferenceManager(
             liveReaderManager,
+            () -> 0L,
             closedChunkIndexManager,
             memChunkReader,
-            org.opensearch.tsdb.core.mapping.LabelStorageType.BINARY,
+            labelStorageType,
             shardId
         );
 
@@ -250,7 +257,7 @@ public class TSDBDirectoryReaderReferenceManagerTests extends OpenSearchTestCase
         });
 
         // Simulate adding a new closed chunk index
-        when(closedChunkIndexManager.getReaderManagers()).thenReturn(
+        when(closedChunkIndexManager.getReaderManagersWithMetadata()).thenReturn(
             Arrays.asList(closedReaderManager1, closedReaderManager2, closedReaderManager3)
         );
 
@@ -285,13 +292,14 @@ public class TSDBDirectoryReaderReferenceManagerTests extends OpenSearchTestCase
     @Test
     public void testSnapshotUpdatedAfterStructuralRefresh() throws IOException {
         // Start with 1 closed chunk index
-        when(closedChunkIndexManager.getReaderManagers()).thenReturn(Arrays.asList(closedReaderManager1));
+        when(closedChunkIndexManager.getReaderManagersWithMetadata()).thenReturn(Arrays.asList(closedReaderManager1));
 
         referenceManager = new TSDBDirectoryReaderReferenceManager(
             liveReaderManager,
+            () -> 0L,
             closedChunkIndexManager,
             memChunkReader,
-            org.opensearch.tsdb.core.mapping.LabelStorageType.BINARY,
+            labelStorageType,
             shardId
         );
 
@@ -301,7 +309,7 @@ public class TSDBDirectoryReaderReferenceManagerTests extends OpenSearchTestCase
         referenceManager.release(initialReader);
 
         // Add a second closed chunk index - this should trigger structural refresh
-        when(closedChunkIndexManager.getReaderManagers()).thenReturn(Arrays.asList(closedReaderManager1, closedReaderManager2));
+        when(closedChunkIndexManager.getReaderManagersWithMetadata()).thenReturn(Arrays.asList(closedReaderManager1, closedReaderManager2));
 
         // First refresh - should be structural (index count changed from 1 to 2)
         referenceManager.maybeRefreshBlocking();
@@ -342,16 +350,17 @@ public class TSDBDirectoryReaderReferenceManagerTests extends OpenSearchTestCase
     @Test
     public void testRefreshWhenClosedChunkIndicesDeleted() throws IOException {
         // Start with 3 closed indices
-        when(closedChunkIndexManager.getReaderManagers()).thenReturn(
+        when(closedChunkIndexManager.getReaderManagersWithMetadata()).thenReturn(
             Arrays.asList(closedReaderManager1, closedReaderManager2, closedReaderManager3)
         );
         int initialRefCountForClosedReader3 = closedReader3.getRefCount();
 
         referenceManager = new TSDBDirectoryReaderReferenceManager(
             liveReaderManager,
+            () -> 0L,
             closedChunkIndexManager,
             memChunkReader,
-            org.opensearch.tsdb.core.mapping.LabelStorageType.BINARY,
+            labelStorageType,
             shardId
         );
         assertEquals("Ref count to closedReader3 should increase by 1", initialRefCountForClosedReader3 + 1, closedReader3.getRefCount());
@@ -362,7 +371,7 @@ public class TSDBDirectoryReaderReferenceManagerTests extends OpenSearchTestCase
         });
 
         // Simulate removing a closed chunk index
-        when(closedChunkIndexManager.getReaderManagers()).thenReturn(Arrays.asList(closedReaderManager1, closedReaderManager2));
+        when(closedChunkIndexManager.getReaderManagersWithMetadata()).thenReturn(Arrays.asList(closedReaderManager1, closedReaderManager2));
 
         // Trigger refresh
         try {
@@ -385,13 +394,14 @@ public class TSDBDirectoryReaderReferenceManagerTests extends OpenSearchTestCase
     @Test
     public void testRefreshWhenLiveIndexChangesNoClosedChunkChange() throws IOException {
         // Set up with 2 closed indices
-        when(closedChunkIndexManager.getReaderManagers()).thenReturn(Arrays.asList(closedReaderManager1, closedReaderManager2));
+        when(closedChunkIndexManager.getReaderManagersWithMetadata()).thenReturn(Arrays.asList(closedReaderManager1, closedReaderManager2));
 
         referenceManager = new TSDBDirectoryReaderReferenceManager(
             liveReaderManager,
+            () -> 0L,
             closedChunkIndexManager,
             memChunkReader,
-            org.opensearch.tsdb.core.mapping.LabelStorageType.BINARY,
+            labelStorageType,
             shardId
         );
 
@@ -424,13 +434,14 @@ public class TSDBDirectoryReaderReferenceManagerTests extends OpenSearchTestCase
     @Test
     public void testRefreshWhenExistingClosedChunkIndexChanges() throws IOException {
         // Set up with 2 closed indices
-        when(closedChunkIndexManager.getReaderManagers()).thenReturn(Arrays.asList(closedReaderManager1, closedReaderManager2));
+        when(closedChunkIndexManager.getReaderManagersWithMetadata()).thenReturn(Arrays.asList(closedReaderManager1, closedReaderManager2));
 
         referenceManager = new TSDBDirectoryReaderReferenceManager(
             liveReaderManager,
+            () -> 0L,
             closedChunkIndexManager,
             memChunkReader,
-            org.opensearch.tsdb.core.mapping.LabelStorageType.BINARY,
+            labelStorageType,
             shardId
         );
 
@@ -473,13 +484,14 @@ public class TSDBDirectoryReaderReferenceManagerTests extends OpenSearchTestCase
     @Test
     public void testRefreshWhenLiveIndexChangesAndNewClosedChunkIndexAdded() throws IOException {
         // Start with 2 closed indices
-        when(closedChunkIndexManager.getReaderManagers()).thenReturn(Arrays.asList(closedReaderManager1, closedReaderManager2));
+        when(closedChunkIndexManager.getReaderManagersWithMetadata()).thenReturn(Arrays.asList(closedReaderManager1, closedReaderManager2));
 
         referenceManager = new TSDBDirectoryReaderReferenceManager(
             liveReaderManager,
+            () -> 0L,
             closedChunkIndexManager,
             memChunkReader,
-            org.opensearch.tsdb.core.mapping.LabelStorageType.BINARY,
+            labelStorageType,
             shardId
         );
 
@@ -493,7 +505,7 @@ public class TSDBDirectoryReaderReferenceManagerTests extends OpenSearchTestCase
         liveWriter.commit();
 
         // Simulate adding a new closed chunk index at the same time
-        when(closedChunkIndexManager.getReaderManagers()).thenReturn(
+        when(closedChunkIndexManager.getReaderManagersWithMetadata()).thenReturn(
             Arrays.asList(closedReaderManager1, closedReaderManager2, closedReaderManager3)
         );
 
@@ -516,13 +528,14 @@ public class TSDBDirectoryReaderReferenceManagerTests extends OpenSearchTestCase
 
     @Test
     public void testConcurrentRefreshOperations() throws IOException, InterruptedException {
-        when(closedChunkIndexManager.getReaderManagers()).thenReturn(Arrays.asList(closedReaderManager1, closedReaderManager2));
+        when(closedChunkIndexManager.getReaderManagersWithMetadata()).thenReturn(Arrays.asList(closedReaderManager1, closedReaderManager2));
 
         referenceManager = new TSDBDirectoryReaderReferenceManager(
             liveReaderManager,
+            () -> 0L,
             closedChunkIndexManager,
             memChunkReader,
-            org.opensearch.tsdb.core.mapping.LabelStorageType.BINARY,
+            labelStorageType,
             shardId
         );
 
@@ -638,16 +651,17 @@ public class TSDBDirectoryReaderReferenceManagerTests extends OpenSearchTestCase
 
     @Test
     public void testReferenceManagerCloseCleanup() throws IOException {
-        when(closedChunkIndexManager.getReaderManagers()).thenReturn(Arrays.asList(closedReaderManager1, closedReaderManager2));
+        when(closedChunkIndexManager.getReaderManagersWithMetadata()).thenReturn(Arrays.asList(closedReaderManager1, closedReaderManager2));
         int initialRefCountForClosedReader1 = closedReader1.getRefCount();
         int initialRefCountForClosedReader2 = closedReader2.getRefCount();
         int initialRefCountForLiveReader = liveReader.getRefCount();
 
         referenceManager = new TSDBDirectoryReaderReferenceManager(
             liveReaderManager,
+            () -> 0L,
             closedChunkIndexManager,
             memChunkReader,
-            org.opensearch.tsdb.core.mapping.LabelStorageType.BINARY,
+            labelStorageType,
             shardId
         );
 

@@ -379,11 +379,7 @@ public abstract class TimeSeriesAggregatorTestCase extends AggregatorTestCase {
             super(in, new SubReaderWrapper() {
                 @Override
                 public LeafReader wrap(LeafReader reader) {
-                    try {
-                        return new LiveSeriesIndexLeafReader(reader, memChunkReader, LabelStorageType.BINARY);
-                    } catch (IOException e) {
-                        throw new RuntimeException("Failed to wrap LeafReader with LiveSeriesIndexLeafReader", e);
-                    }
+                    return new LiveSeriesIndexLeafReader(reader, memChunkReader, LabelStorageType.BINARY);
                 }
             });
             this.memChunkReader = memChunkReader;

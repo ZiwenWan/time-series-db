@@ -75,6 +75,7 @@ import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.UnionPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.ValueFilterPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.visitor.M3PlanVisitor;
 import org.opensearch.tsdb.lang.m3.stage.ValueFilterStage;
+import org.opensearch.tsdb.query.search.TimeRangePruningQueryBuilder;
 import org.opensearch.tsdb.query.aggregator.TimeSeriesCoordinatorAggregationBuilder;
 import org.opensearch.tsdb.query.aggregator.TimeSeriesCoordinatorAggregator;
 import org.opensearch.tsdb.query.aggregator.TimeSeriesUnfoldAggregationBuilder;
@@ -633,6 +634,9 @@ public class SourceBuilderVisitor extends M3PlanVisitor<SourceBuilderVisitor.Com
         }
 
         BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+        // Add time filtering before tag filtering, so segments can be pruned without collecting terms in certain query paths
+        boolQuery.filter(QueryBuilders.rangeQuery(Constants.IndexSchema.TIMESTAMP_RANGE).gte(range.start).lt(range.end));
+
         // Add filter clauses from matchFilters
         for (Map.Entry<String, List<String>> entry : matchFilters.entrySet()) {
             String field = entry.getKey();
@@ -647,10 +651,8 @@ public class SourceBuilderVisitor extends M3PlanVisitor<SourceBuilderVisitor.Com
             boolQuery.mustNot(createFieldQuery(field, values));
         }
 
-        // Add time filtering using LongRange field
-        boolQuery.filter(QueryBuilders.rangeQuery(Constants.IndexSchema.TIMESTAMP_RANGE).gte(range.start).lt(range.end));
-
-        return boolQuery;
+        // Wrap with TimeRangePruningQueryBuilder to prune non-overlapping leaves.
+        return new TimeRangePruningQueryBuilder(boolQuery, range.start, range.end);
     }
 
     private QueryBuilder createFieldQuery(String field, List<String> values) {

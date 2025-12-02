@@ -60,6 +60,7 @@ public class Head implements Closeable {
     private final ShardId shardId;
     private final Tags metricTags;
     private volatile long maxTime; // volatile to ensure the flush thread sees updates
+    private volatile long minTime; // volatile to ensure TSDBDirectoryReader sees most recent minTime
 
     /**
      * Constructs a new Head instance.
@@ -144,6 +145,15 @@ public class Head implements Closeable {
         if (timestamp > maxTime) {
             maxTime = timestamp;
         }
+    }
+
+    /**
+     * Get the minimum possible timestamp of sampels in the head
+     *
+     * @return the possible minimum timestamp of samples in the head
+     */
+    public long getMinTimestamp() {
+        return minTime;
     }
 
     /**
@@ -291,6 +301,16 @@ public class Head implements Closeable {
         List<MemSeries> allSeries = getSeriesMap().getSeriesMap();
         IndexChunksResult indexChunksResult = indexCloseableChunks(allSeries);
 
+        // Only attempt to update minTime if there are open chunks, or we're not initializing
+        if (indexChunksResult.minTimestamp != Long.MAX_VALUE || maxTime != Long.MIN_VALUE) {
+            // If head contains an old timestamp beyond the out-of-order cutoff, it is guaranteed to be the minimum so use it
+            // If the oldest timestamp is larger than the out-of-order cutoff, we may accept a sample as old as the cutoff, use the cutoff
+            long minTimestamp = Math.min(indexChunksResult.minTimestamp, maxTime - oooCutoffWindow);
+            if (minTime < minTimestamp) {
+                minTime = minTimestamp;
+            }
+        }
+
         // translog replays starts from LOCAL_CHECKPOINT_KEY + 1, since it expects the local checkpoint to be the last processed seq no
         // the minSeqNo computed here is the minimum sequence number of all in-memory samples, therefore we must replay it (subtract one).
         // If the minSeqNo is Long.MAX_VALUE indicating all chunks are closed, return Long.MAX_VALUE.
@@ -331,6 +351,7 @@ public class Head implements Closeable {
      */
     private IndexChunksResult indexCloseableChunks(List<MemSeries> seriesList) {
         long minSeqNo = Long.MAX_VALUE;
+        long minTimestamp = Long.MAX_VALUE;
         Map<MemSeries, Set<MemChunk>> seriesToClosedChunks = new HashMap<>();
         int totalClosedChunks = 0;
 
@@ -361,16 +382,22 @@ public class Head implements Closeable {
                 if (closeableChunkResult.minSeqNo() < minSeqNo) {
                     minSeqNo = closeableChunkResult.minSeqNo();
                 }
+                if (closeableChunkResult.minTimestamp() < minTimestamp) {
+                    minTimestamp = closeableChunkResult.minTimestamp();
+                }
             } else {
                 // If processed partially e.g. due to ongoing compaction, use first failed chunk's minSeq.
                 MemChunk failedChunk = closeableChunkResult.closableChunks().get(addedChunks);
                 if (failedChunk.getMinSeqNo() < minSeqNo) {
                     minSeqNo = failedChunk.getMinSeqNo();
                 }
+                if (failedChunk.getMinTimestamp() < minTimestamp) {
+                    minTimestamp = failedChunk.getMinTimestamp();
+                }
             }
             totalClosedChunks += addedChunks;
         }
-        return new IndexChunksResult(seriesToClosedChunks, minSeqNo, totalClosedChunks);
+        return new IndexChunksResult(seriesToClosedChunks, minSeqNo, totalClosedChunks, minTimestamp);
     }
 
     /**
@@ -379,8 +406,10 @@ public class Head implements Closeable {
      * @param seriesToClosedChunks map of MemSeries to the set of MemChunks that were successfully indexed and should be dropped from memory
      * @param minSeqNo             minimum sequence number among all remaining in-memory (non-closed) samples, or Long.MAX_VALUE if all chunks were closed
      * @param numClosedChunks      total count of MemChunks that were closed and indexed
+     * @param minTimestamp         minimum timestamp among all remaining in-memory (non-closed) samples, or Long.MAX_VALUE if all chunks were closed
      */
-    private record IndexChunksResult(Map<MemSeries, Set<MemChunk>> seriesToClosedChunks, long minSeqNo, int numClosedChunks) {
+    private record IndexChunksResult(Map<MemSeries, Set<MemChunk>> seriesToClosedChunks, long minSeqNo, int numClosedChunks,
+        long minTimestamp) {
     }
 
     /**

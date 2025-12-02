@@ -36,6 +36,7 @@ import org.opensearch.tsdb.TestUtils;
 import org.opensearch.tsdb.core.chunk.Chunk;
 import org.opensearch.tsdb.core.chunk.ChunkIterator;
 import org.opensearch.tsdb.core.compaction.NoopCompaction;
+import org.opensearch.tsdb.core.index.ReaderManagerWithMetadata;
 import org.opensearch.tsdb.core.index.closed.ClosedChunk;
 import org.opensearch.tsdb.core.index.closed.ClosedChunkIndexIO;
 import org.opensearch.tsdb.core.index.closed.ClosedChunkIndexManager;
@@ -114,10 +115,15 @@ public class HeadTests extends OpenSearchTestCase {
 
         head.getLiveSeriesIndex().getDirectoryReaderManager().maybeRefreshBlocking();
 
+        assertEquals("Initial minTime should be 0", 0L, head.getMinTimestamp());
+
         head.closeHeadChunks(true);
-        closedChunkIndexManager.getReaderManagers().forEach(rm -> {
+
+        assertEquals("minTime should be 8000 after first flush", 8000L, head.getMinTimestamp());
+
+        closedChunkIndexManager.getReaderManagersWithMetadata().forEach(rm -> {
             try {
-                rm.maybeRefreshBlocking();
+                rm.readerMananger().maybeRefreshBlocking();
             } catch (IOException e) {
                 fail("Failed to refresh ClosedChunkIndexManager ReaderManager: " + e.getMessage());
             }
@@ -127,7 +133,7 @@ public class HeadTests extends OpenSearchTestCase {
         assertNotNull(head.getLiveSeriesIndex().getDirectoryReaderManager());
 
         // Verify ClosedChunkIndexManager ReaderManagers are accessible
-        List<ReaderManager> readerManagers = closedChunkIndexManager.getReaderManagers();
+        List<ReaderManagerWithMetadata> readerManagers = closedChunkIndexManager.getReaderManagersWithMetadata();
         assertFalse(readerManagers.isEmpty());
 
         List<Object> seriesChunks = getChunks(head, closedChunkIndexManager);
@@ -376,6 +382,89 @@ public class HeadTests extends OpenSearchTestCase {
         // closeHeadChunks should handle the failure gracefully and return the first failed chunk's minSeqNo - 1
         long minSeqNo = head.closeHeadChunks(true);
         assertEquals(99, minSeqNo); // 100 - 1
+
+        head.close();
+        closedChunkIndexManager.close();
+    }
+
+    public void testHeadMinTime() throws IOException, InterruptedException {
+        ClosedChunkIndexManager closedChunkIndexManager = new ClosedChunkIndexManager(
+            createTempDir("metrics"),
+            new InMemoryMetadataStore(),
+            new NOOPRetention(),
+            new NoopCompaction(),
+            threadPool,
+            new ShardId("headTest", "headTestUid", 0),
+            defaultSettings
+        );
+
+        Head head = new Head(
+            createTempDir("testHeadMinTime"),
+            new ShardId("headTest", "headTestUid", 0),
+            closedChunkIndexManager,
+            defaultSettings
+        );
+        Labels seriesLabels = ByteLabels.fromStrings("k1", "v1", "k2", "v2");
+
+        for (int i = 16; i < 18; i++) {
+            long timestamp = i * 1000L;
+            double value = i;
+
+            Head.HeadAppender appender = head.newAppender();
+            appender.preprocess(Engine.Operation.Origin.PRIMARY, 0, 0, seriesLabels, timestamp, value, () -> {});
+            appender.append(() -> {}, () -> {});
+        }
+
+        head.getLiveSeriesIndex().getDirectoryReaderManager().maybeRefreshBlocking();
+
+        assertEquals("Initial minTime should be 0", 0L, head.getMinTimestamp());
+
+        head.closeHeadChunks(true);
+
+        // test when minTimestamp = maxTimestamp - oooCutoff
+        assertEquals("minTime should be 9000 after first flush", 9000L, head.getMinTimestamp());
+
+        // ingest at 10, 15, 20, 25
+        for (int i = 10; i < 26; i += 5) {
+            long timestamp = i * 1000L;
+            double value = i;
+
+            Head.HeadAppender appender = head.newAppender();
+            appender.preprocess(Engine.Operation.Origin.PRIMARY, 0, 0, seriesLabels, timestamp, value, () -> {});
+            appender.append(() -> {}, () -> {});
+        }
+
+        head.closeHeadChunks(true);
+
+        // test when minTimestamp = openChunk.getMinTimestamp (not equal to any sample's timestamp)
+        assertEquals("minTime should be 8000 after second flush", 16000L, head.getMinTimestamp());
+
+        head.close();
+        closedChunkIndexManager.close();
+    }
+
+    public void testHeadCloseHeadChunksEmpty() throws IOException {
+        ClosedChunkIndexManager closedChunkIndexManager = new ClosedChunkIndexManager(
+            createTempDir("metrics"),
+            new InMemoryMetadataStore(),
+            new NOOPRetention(),
+            new NoopCompaction(),
+            threadPool,
+            new ShardId("headTest", "headTestUid", 0),
+            defaultSettings
+        );
+
+        Head head = new Head(
+            createTempDir("testHeadCloseHeadChunksEmpty"),
+            new ShardId("headTest", "headTestUid", 0),
+            closedChunkIndexManager,
+            defaultSettings
+        );
+        head.getLiveSeriesIndex().getDirectoryReaderManager().maybeRefreshBlocking();
+        assertEquals("Initial minTime should be 0", 0L, head.getMinTimestamp());
+
+        head.closeHeadChunks(true);
+        assertEquals("After flush minTime should remain 0", 0L, head.getMinTimestamp());
 
         head.close();
         closedChunkIndexManager.close();
@@ -711,9 +800,9 @@ public class HeadTests extends OpenSearchTestCase {
         List<Object> chunks = new ArrayList<>();
 
         // Query ClosedChunkIndexes
-        List<ReaderManager> closedReaderManagers = closedChunkIndexManager.getReaderManagers();
+        List<ReaderManagerWithMetadata> closedReaderManagers = closedChunkIndexManager.getReaderManagersWithMetadata();
         for (int i = 0; i < closedReaderManagers.size(); i++) {
-            ReaderManager closedReaderManager = closedReaderManagers.get(i);
+            ReaderManager closedReaderManager = closedReaderManagers.get(i).readerMananger();
             DirectoryReader closedReader = null;
             try {
                 closedReader = closedReaderManager.acquire();

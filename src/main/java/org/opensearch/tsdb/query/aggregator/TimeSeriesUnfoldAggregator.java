@@ -7,8 +7,6 @@
  */
 package org.opensearch.tsdb.query.aggregator;
 
-import org.apache.lucene.index.FilterLeafReader;
-import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.search.ScoreMode;
 import org.opensearch.search.aggregations.Aggregator;
@@ -176,7 +174,17 @@ public class TimeSeriesUnfoldAggregator extends BucketsAggregator {
             collectStartNanos = System.nanoTime();
         }
 
-        return new TimeSeriesUnfoldLeafBucketCollector(sub, ctx);
+        // Check if this leaf reader can be pruned based on time range
+        TSDBLeafReader tsdbLeafReader = TSDBLeafReader.unwrapLeafReader(ctx.reader());
+        if (tsdbLeafReader == null) {
+            throw new IOException("Expected TSDBLeafReader but found: " + ctx.reader().getClass().getName());
+        }
+        if (!tsdbLeafReader.overlapsTimeRange(minTimestamp, maxTimestamp)) {
+            // No matching data in this segment, skip it by returning the sub-collector
+            return sub;
+        }
+
+        return new TimeSeriesUnfoldLeafBucketCollector(sub, ctx, tsdbLeafReader);
     }
 
     private class TimeSeriesUnfoldLeafBucketCollector extends LeafBucketCollectorBase {
@@ -185,30 +193,14 @@ public class TimeSeriesUnfoldAggregator extends BucketsAggregator {
         private final TSDBLeafReader tsdbLeafReader;
         private TSDBDocValues tsdbDocValues;
 
-        public TimeSeriesUnfoldLeafBucketCollector(LeafBucketCollector sub, LeafReaderContext ctx) throws IOException {
+        public TimeSeriesUnfoldLeafBucketCollector(LeafBucketCollector sub, LeafReaderContext ctx, TSDBLeafReader tsdbLeafReader)
+            throws IOException {
             super(sub, ctx);
             this.subCollector = sub;
-
-            // Get the TSDBLeafReader from the context
-            this.tsdbLeafReader = unwrapTSDBLeafReader(ctx.reader());
-            if (this.tsdbLeafReader == null) {
-                throw new IOException("Expected TSDBLeafReader but found: " + ctx.reader().getClass().getName());
-            }
+            this.tsdbLeafReader = tsdbLeafReader;
 
             // Get TSDBDocValues - this provides unified access to chunks and labels
             this.tsdbDocValues = this.tsdbLeafReader.getTSDBDocValues();
-        }
-
-        /**
-         * Unwrap filter readers to find the underlying TSDBLeafReader.
-         */
-        private TSDBLeafReader unwrapTSDBLeafReader(LeafReader reader) {
-            if (reader instanceof TSDBLeafReader tsdbLeafReader) {
-                return tsdbLeafReader;
-            } else if (reader instanceof FilterLeafReader filterReader) {
-                return unwrapTSDBLeafReader(filterReader.getDelegate());
-            }
-            return null;
         }
 
         @Override

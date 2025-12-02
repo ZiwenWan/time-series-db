@@ -1,54 +1,61 @@
 {
   "size" : 0,
   "query" : {
-    "bool" : {
-      "filter" : [
-        {
-          "terms" : {
-            "labels" : [
-              "name:service.errors"
-            ],
-            "boost" : 1.0
-          }
-        },
-        {
-          "bool" : {
-            "should" : [
-              {
-                "terms" : {
-                  "labels" : [
-                    "region:ca"
-                  ],
+    "time_range_pruner" : {
+      "min_timestamp" : 999940000,
+      "max_timestamp" : 1001000000,
+      "query" : {
+        "bool" : {
+          "filter" : [
+            {
+              "range" : {
+                "timestamp_range" : {
+                  "from" : 999940000,
+                  "to" : 1001000000,
+                  "include_lower" : true,
+                  "include_upper" : false,
                   "boost" : 1.0
                 }
-              },
-              {
-                "wildcard" : {
-                  "labels" : {
-                    "wildcard" : "region:us-*",
-                    "boost" : 1.0
-                  }
-                }
               }
-            ],
-            "adjust_pure_negative" : true,
-            "minimum_should_match" : "1",
-            "boost" : 1.0
-          }
-        },
-        {
-          "range" : {
-            "timestamp_range" : {
-              "from" : 999940000,
-              "to" : 1001000000,
-              "include_lower" : true,
-              "include_upper" : false,
-              "boost" : 1.0
+            },
+            {
+              "terms" : {
+                "labels" : [
+                  "name:service.errors"
+                ],
+                "boost" : 1.0
+              }
+            },
+            {
+              "bool" : {
+                "should" : [
+                  {
+                    "terms" : {
+                      "labels" : [
+                        "region:ca"
+                      ],
+                      "boost" : 1.0
+                    }
+                  },
+                  {
+                    "wildcard" : {
+                      "labels" : {
+                        "wildcard" : "region:us-*",
+                        "boost" : 1.0
+                      }
+                    }
+                  }
+                ],
+                "adjust_pure_negative" : true,
+                "minimum_should_match" : "1",
+                "boost" : 1.0
+              }
             }
-          }
+          ],
+          "adjust_pure_negative" : true,
+          "boost" : 1.0
         }
-      ],
-      "adjust_pure_negative" : true,
+      },
       "boost" : 1.0
     }
   },
