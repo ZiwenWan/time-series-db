@@ -162,6 +162,11 @@ public class Constants {
         public static final String SCALE_TO_SECONDS = "scaleToSeconds";
 
         /**
+         * sustain function name.
+         */
+        public static final String SUSTAIN = "sustain";
+
+        /**
          * timeshift function name.
          */
         public static final String TIMESHIFT = "timeshift";
