@@ -2,6 +2,9 @@ name: Build And Test Plugin
 
 on:
   pull_request_target:
+  push:
+    branches:
+      - main
 
 jobs:
   Get-CI-Image-Tag:
@@ -28,7 +31,7 @@ jobs:
       run: ${{ needs.Get-CI-Image-Tag.outputs.ci-image-start-command }}
     - uses: actions/checkout@v6
       with:
-        ref: ${{ github.event.pull_request.head.sha }}
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
     - name: Set up JDK
       uses: actions/setup-java@v4
       with:
@@ -59,7 +62,7 @@ jobs:
     steps:
     - uses: actions/checkout@v6
       with:
-        ref: ${{ github.event.pull_request.head.sha }}
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
     - name: Set up JDK
       uses: actions/setup-java@v4
       with:
