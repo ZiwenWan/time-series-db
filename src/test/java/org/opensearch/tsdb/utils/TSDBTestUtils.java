@@ -163,8 +163,39 @@ public final class TSDBTestUtils {
      * @return Total number of samples across all time series in the time range
      */
     public static int getSampleCountViaAggregation(Client client, String indexName, long startTime, long endTime, long interval) {
+        return getSampleCountViaAggregation(client, indexName, startTime, endTime, interval, null);
+    }
+
+    /**
+     * Get sample count via aggregation with optional preference routing.
+     * This allows querying specific shards for validation in recovery tests.
+     *
+     * @param client The client to use for search
+     * @param indexName The index name
+     * @param startTime Start time for aggregation
+     * @param endTime End time for aggregation
+     * @param interval Interval for aggregation
+     * @param preference Optional preference routing (e.g., "_shards:0|nodeId" to query specific shard)
+     * @return Total sample count
+     */
+    public static int getSampleCountViaAggregation(
+        Client client,
+        String indexName,
+        long startTime,
+        long endTime,
+        long interval,
+        String preference
+    ) {
         AggregationBuilder aggregation = new TimeSeriesUnfoldAggregationBuilder("raw_unfold", List.of(), startTime, endTime, interval);
-        SearchResponse aggResponse = client.prepareSearch(indexName).setSize(0).addAggregation(aggregation).get();
+
+        var searchRequest = client.prepareSearch(indexName).setSize(0).addAggregation(aggregation);
+
+        // Set preference routing if provided (for shard-specific queries)
+        if (preference != null && !preference.isEmpty()) {
+            searchRequest.setPreference(preference);
+        }
+
+        SearchResponse aggResponse = searchRequest.get();
 
         InternalTimeSeries unfoldResult = aggResponse.getAggregations().get("raw_unfold");
         if (unfoldResult == null || unfoldResult.getTimeSeries().isEmpty()) {

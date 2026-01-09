@@ -229,7 +229,7 @@ public abstract class TimeSeriesTestFramework extends OpenSearchIntegTestCase im
      * Parse the TSDB engine's default mapping from Constants.
      * This ensures we use the exact same mapping as the engine.
      */
-    private Map<String, Object> parseMappingFromConstants() throws IOException {
+    protected Map<String, Object> parseMappingFromConstants() throws IOException {
         ObjectMapper jsonMapper = new ObjectMapper();
         String mappingJson = Constants.Mapping.DEFAULT_INDEX_MAPPING.trim();
         return jsonMapper.readValue(mappingJson, Map.class);
