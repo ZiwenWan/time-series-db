@@ -70,7 +70,6 @@ public class TopKStageTests extends AbstractWireSerializingTestCase<TopKStage> {
     }
 
     public void testConstructorWithInvalidK() {
-        // Act & Assert
         IllegalArgumentException exception = expectThrows(IllegalArgumentException.class, () -> new TopKStage(0));
         assertEquals("K must be positive, got: 0", exception.getMessage());
 
@@ -79,13 +78,11 @@ public class TopKStageTests extends AbstractWireSerializingTestCase<TopKStage> {
     }
 
     public void testConstructorWithNullSortBy() {
-        // Act & Assert
         IllegalArgumentException exception = expectThrows(IllegalArgumentException.class, () -> new TopKStage(5, null, SortOrderType.ASC));
         assertEquals("SortBy cannot be null", exception.getMessage());
     }
 
     public void testConstructorWithNullSortOrder() {
-        // Act & Assert
         IllegalArgumentException exception = expectThrows(IllegalArgumentException.class, () -> new TopKStage(5, SortByType.AVG, null));
         assertEquals("SortOrder cannot be null", exception.getMessage());
     }
@@ -109,81 +106,35 @@ public class TopKStageTests extends AbstractWireSerializingTestCase<TopKStage> {
         TestUtils.assertNullInputThrowsException(topKStage, "topK");
     }
 
-    public void testProcessTopKWithCurrentDesc() {
-        // Arrange: Create test series with different current values
+    public void testProcessTopKSorting() {
         List<TimeSeries> input = createTestSeriesABC();
-        TopKStage topKStage = new TopKStage(2, SortByType.CURRENT, SortOrderType.DESC);
 
-        // Act
-        List<TimeSeries> result = topKStage.process(input);
-
-        // Assert: Should return top 2 by current desc (B=3.0, C=2.0)
-        assertEquals(2, result.size());
-        assertEquals("B", getLabel(result.get(0))); // current=3.0
-        assertEquals("C", getLabel(result.get(1))); // current=2.0
+        // Test CURRENT DESC: B=3.0, C=2.0
+        testSortingCase(input, SortByType.CURRENT, SortOrderType.DESC, new String[] { "B", "C" });
+        // Test CURRENT ASC: A=1.0, C=2.0
+        testSortingCase(input, SortByType.CURRENT, SortOrderType.ASC, new String[] { "A", "C" });
+        // Test AVG DESC: B=2.0, C=1.5
+        testSortingCase(input, SortByType.AVG, SortOrderType.DESC, new String[] { "B", "C" });
+        // Test SUM DESC: B=6.0, C=3.0
+        testSortingCase(input, SortByType.SUM, SortOrderType.DESC, new String[] { "B", "C" });
+        // Test MAX DESC: B=3.0, C=2.0
+        testSortingCase(input, SortByType.MAX, SortOrderType.DESC, new String[] { "B", "C" });
     }
 
-    public void testProcessTopKWithCurrentAsc() {
-        // Arrange
-        List<TimeSeries> input = createTestSeriesABC();
-        TopKStage topKStage = new TopKStage(2, SortByType.CURRENT, SortOrderType.ASC);
-
-        // Act
+    private void testSortingCase(List<TimeSeries> input, SortByType sortBy, SortOrderType sortOrder, String[] expectedLabels) {
+        TopKStage topKStage = new TopKStage(2, sortBy, sortOrder);
         List<TimeSeries> result = topKStage.process(input);
-
-        // Assert: Should return top 2 by current asc (A=1.0, C=2.0)
         assertEquals(2, result.size());
-        assertEquals("A", getLabel(result.get(0))); // current=1.0
-        assertEquals("C", getLabel(result.get(1))); // current=2.0
-    }
-
-    public void testProcessTopKWithAvgDesc() {
-        // Arrange
-        List<TimeSeries> input = createTestSeriesABC();
-        TopKStage topKStage = new TopKStage(2, SortByType.AVG, SortOrderType.DESC);
-
-        // Act
-        List<TimeSeries> result = topKStage.process(input);
-
-        // Assert: Should return top 2 by avg desc (B=2.0, C=1.5)
-        assertEquals(2, result.size());
-        assertEquals("B", getLabel(result.get(0))); // avg=2.0
-        assertEquals("C", getLabel(result.get(1))); // avg=1.5
-    }
-
-    public void testProcessTopKWithSumDesc() {
-        // Arrange
-        List<TimeSeries> input = createTestSeriesABC();
-        TopKStage topKStage = new TopKStage(2, SortByType.SUM, SortOrderType.DESC);
-
-        // Act
-        List<TimeSeries> result = topKStage.process(input);
-
-        // Assert: Should return top 2 by sum desc (B=6.0, C=3.0)
-        assertEquals(2, result.size());
-        assertEquals("B", getLabel(result.get(0))); // sum=6.0
-        assertEquals("C", getLabel(result.get(1))); // sum=3.0
-    }
-
-    public void testProcessTopKWithMaxDesc() {
-        // Arrange
-        List<TimeSeries> input = createTestSeriesABC();
-        TopKStage topKStage = new TopKStage(2, SortByType.MAX, SortOrderType.DESC);
-
-        // Act
-        List<TimeSeries> result = topKStage.process(input);
-
-        // Assert: Should return top 2 by max desc (B=3.0, C=2.0)
-        assertEquals(2, result.size());
-        assertEquals("B", getLabel(result.get(0))); // max=3.0
-        assertEquals("C", getLabel(result.get(1))); // max=2.0
+        for (int i = 0; i < expectedLabels.length; i++) {
+            assertEquals(expectedLabels[i], getLabel(result.get(i)));
+        }
     }
 
     public void testProcessTopKWithMinAsc() {
         // Arrange: Create series with different minimum values
-        TimeSeries seriesA = createLabeledTimeSeries("A", Arrays.asList(5.0, 10.0)); // min=5.0
-        TimeSeries seriesB = createLabeledTimeSeries("B", Arrays.asList(1.0, 20.0)); // min=1.0
-        TimeSeries seriesC = createLabeledTimeSeries("C", Arrays.asList(10.0, 15.0)); // min=10.0
+        TimeSeries seriesA = StageTestUtils.createTimeSeries("A", Map.of("label", "A"), Arrays.asList(5.0, 10.0)); // min=5.0
+        TimeSeries seriesB = StageTestUtils.createTimeSeries("B", Map.of("label", "B"), Arrays.asList(1.0, 20.0)); // min=1.0
+        TimeSeries seriesC = StageTestUtils.createTimeSeries("C", Map.of("label", "C"), Arrays.asList(10.0, 15.0)); // min=10.0
         List<TimeSeries> input = Arrays.asList(seriesA, seriesB, seriesC);
 
         TopKStage topKStage = new TopKStage(2, SortByType.MIN, SortOrderType.ASC);
@@ -199,9 +150,9 @@ public class TopKStageTests extends AbstractWireSerializingTestCase<TopKStage> {
 
     public void testProcessTopKWithStddevDesc() {
         // Arrange: Create series with different variations
-        TimeSeries seriesA = createLabeledTimeSeries("A", Arrays.asList(5.0, 5.0)); // stddev=0.0
-        TimeSeries seriesB = createLabeledTimeSeries("B", Arrays.asList(1.0, 10.0)); // stddev=high
-        TimeSeries seriesC = createLabeledTimeSeries("C", Arrays.asList(4.0, 6.0)); // stddev=medium
+        TimeSeries seriesA = StageTestUtils.createTimeSeries("A", Map.of("label", "A"), Arrays.asList(5.0, 5.0)); // stddev=0.0
+        TimeSeries seriesB = StageTestUtils.createTimeSeries("B", Map.of("label", "B"), Arrays.asList(1.0, 10.0)); // stddev=high
+        TimeSeries seriesC = StageTestUtils.createTimeSeries("C", Map.of("label", "C"), Arrays.asList(4.0, 6.0)); // stddev=medium
         List<TimeSeries> input = Arrays.asList(seriesA, seriesB, seriesC);
 
         TopKStage topKStage = new TopKStage(2, SortByType.STDDEV, SortOrderType.DESC);
@@ -217,9 +168,9 @@ public class TopKStageTests extends AbstractWireSerializingTestCase<TopKStage> {
 
     public void testProcessTopKWithNameAsc() {
         // Arrange
-        TimeSeries seriesA = createTimeSeriesWithAlias("charlie", Arrays.asList(1.0));
-        TimeSeries seriesB = createTimeSeriesWithAlias("alpha", Arrays.asList(2.0));
-        TimeSeries seriesC = createTimeSeriesWithAlias("bravo", Arrays.asList(3.0));
+        TimeSeries seriesA = StageTestUtils.createTimeSeries("charlie", Map.of(), Arrays.asList(1.0));
+        TimeSeries seriesB = StageTestUtils.createTimeSeries("alpha", Map.of(), Arrays.asList(2.0));
+        TimeSeries seriesC = StageTestUtils.createTimeSeries("bravo", Map.of(), Arrays.asList(3.0));
         List<TimeSeries> input = Arrays.asList(seriesA, seriesB, seriesC);
 
         TopKStage topKStage = new TopKStage(2, SortByType.NAME, SortOrderType.ASC);
@@ -247,7 +198,9 @@ public class TopKStageTests extends AbstractWireSerializingTestCase<TopKStage> {
 
     public void testProcessTopKWithSingleTimeSeries() {
         // Arrange
-        List<TimeSeries> input = Arrays.asList(createLabeledTimeSeries("single", Arrays.asList(1.0, 2.0)));
+        List<TimeSeries> input = Arrays.asList(
+            StageTestUtils.createTimeSeries("single", Map.of("label", "single"), Arrays.asList(1.0, 2.0))
+        );
         TopKStage topKStage = new TopKStage(3);
 
         // Act
@@ -438,40 +391,26 @@ public class TopKStageTests extends AbstractWireSerializingTestCase<TopKStage> {
         assertEquals(7, topKStage.getK());
     }
 
-    public void testFromArgsWithInvalidStringK() {
-        // Arrange
-        Map<String, Object> args = Map.of(TopKStage.K_ARG, "invalid");
+    public void testFromArgsWithInvalidTypes() {
+        // Invalid string k
+        Map<String, Object> args1 = Map.of(TopKStage.K_ARG, "invalid");
+        IllegalArgumentException exception1 = expectThrows(IllegalArgumentException.class, () -> TopKStage.fromArgs(args1));
+        assertTrue(exception1.getMessage().contains("Invalid type for 'k' argument"));
 
-        // Act & Assert
-        IllegalArgumentException exception = expectThrows(IllegalArgumentException.class, () -> TopKStage.fromArgs(args));
-        assertTrue(exception.getMessage().contains("Invalid type for 'k' argument"));
-    }
+        // Invalid k type (list)
+        Map<String, Object> args2 = Map.of(TopKStage.K_ARG, Arrays.asList(1, 2, 3));
+        IllegalArgumentException exception2 = expectThrows(IllegalArgumentException.class, () -> TopKStage.fromArgs(args2));
+        assertTrue(exception2.getMessage().contains("Invalid type for 'k' argument"));
 
-    public void testFromArgsWithInvalidKType() {
-        // Arrange
-        Map<String, Object> args = Map.of(TopKStage.K_ARG, Arrays.asList(1, 2, 3));
+        // Invalid sortBy type
+        Map<String, Object> args3 = Map.of(TopKStage.SORT_BY_ARG, 123);
+        IllegalArgumentException exception3 = expectThrows(IllegalArgumentException.class, () -> TopKStage.fromArgs(args3));
+        assertTrue(exception3.getMessage().contains("Invalid type for 'sortBy' argument"));
 
-        // Act & Assert
-        IllegalArgumentException exception = expectThrows(IllegalArgumentException.class, () -> TopKStage.fromArgs(args));
-        assertTrue(exception.getMessage().contains("Invalid type for 'k' argument"));
-    }
-
-    public void testFromArgsWithInvalidSortByType() {
-        // Arrange
-        Map<String, Object> args = Map.of(TopKStage.SORT_BY_ARG, 123);
-
-        // Act & Assert
-        IllegalArgumentException exception = expectThrows(IllegalArgumentException.class, () -> TopKStage.fromArgs(args));
-        assertTrue(exception.getMessage().contains("Invalid type for 'sortBy' argument"));
-    }
-
-    public void testFromArgsWithInvalidSortOrderType() {
-        // Arrange
-        Map<String, Object> args = Map.of(TopKStage.SORT_ORDER_ARG, 456);
-
-        // Act & Assert
-        IllegalArgumentException exception = expectThrows(IllegalArgumentException.class, () -> TopKStage.fromArgs(args));
-        assertTrue(exception.getMessage().contains("Invalid type for 'sortOrder' argument"));
+        // Invalid sortOrder type
+        Map<String, Object> args4 = Map.of(TopKStage.SORT_ORDER_ARG, 456);
+        IllegalArgumentException exception4 = expectThrows(IllegalArgumentException.class, () -> TopKStage.fromArgs(args4));
+        assertTrue(exception4.getMessage().contains("Invalid type for 'sortOrder' argument"));
     }
 
     public void testFromArgsWithNullValues() {
@@ -581,7 +520,7 @@ public class TopKStageTests extends AbstractWireSerializingTestCase<TopKStage> {
     public void testProcessWithEmptyTimeSeries() {
         // Arrange: Empty time series should not cause errors
         TopKStage topKStage = new TopKStage(3);
-        TimeSeries emptyTimeSeries = createLabeledTimeSeries("empty", new ArrayList<>());
+        TimeSeries emptyTimeSeries = StageTestUtils.createTimeSeries("empty", Map.of("label", "empty"), new ArrayList<>());
         List<TimeSeries> input = Arrays.asList(emptyTimeSeries);
 
         // Act
@@ -617,36 +556,10 @@ public class TopKStageTests extends AbstractWireSerializingTestCase<TopKStage> {
      * Series C: [1.0, 2.0] -> avg=1.5, max=2.0, sum=3.0, current=2.0
      */
     private List<TimeSeries> createTestSeriesABC() {
-        TimeSeries seriesA = createLabeledTimeSeries("A", Arrays.asList(1.0, 1.0));
-        TimeSeries seriesB = createLabeledTimeSeries("B", Arrays.asList(1.0, 2.0, 3.0));
-        TimeSeries seriesC = createLabeledTimeSeries("C", Arrays.asList(1.0, 2.0));
+        TimeSeries seriesA = StageTestUtils.createTimeSeries("A", Map.of("label", "A"), Arrays.asList(1.0, 1.0));
+        TimeSeries seriesB = StageTestUtils.createTimeSeries("B", Map.of("label", "B"), Arrays.asList(1.0, 2.0, 3.0));
+        TimeSeries seriesC = StageTestUtils.createTimeSeries("C", Map.of("label", "C"), Arrays.asList(1.0, 2.0));
         return Arrays.asList(seriesA, seriesB, seriesC);
-    }
-
-    /**
-     * Creates a time series with a label identifier for testing.
-     */
-    private TimeSeries createLabeledTimeSeries(String label, List<Double> values) {
-        List<Sample> samples = new ArrayList<>();
-        for (int i = 0; i < values.size(); i++) {
-            samples.add(new FloatSample(1000L + i * 1000L, values.get(i)));
-        }
-        Labels labels = ByteLabels.fromMap(Map.of("label", label));
-        long endTime = values.isEmpty() ? 1000L : 1000L + (values.size() - 1) * 1000L;
-        return new TimeSeries(samples, labels, 1000L, endTime, 1000L, label);
-    }
-
-    /**
-     * Creates a time series with an alias for testing NAME sorting.
-     */
-    private TimeSeries createTimeSeriesWithAlias(String alias, List<Double> values) {
-        List<Sample> samples = new ArrayList<>();
-        for (int i = 0; i < values.size(); i++) {
-            samples.add(new FloatSample(1000L + i * 1000L, values.get(i)));
-        }
-        Labels labels = ByteLabels.emptyLabels();
-        long endTime = values.isEmpty() ? 1000L : 1000L + (values.size() - 1) * 1000L;
-        return new TimeSeries(samples, labels, 1000L, endTime, 1000L, alias);
     }
 
     /**

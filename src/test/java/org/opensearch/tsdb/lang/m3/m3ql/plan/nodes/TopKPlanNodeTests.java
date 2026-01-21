@@ -139,28 +139,27 @@ public class TopKPlanNodeTests extends BasePlanNodeTests {
         assertEquals("TOPK(7, avg, desc)", node.getExplainName());
     }
 
-    public void testTopKPlanNodeFactoryMethodWithAllValidSortFunctions() {
-        String[] validSortFunctions = { "avg", "current", "max", "min", "name", "stddev", "sum" };
-        SortByType[] expectedSortByTypes = {
-            SortByType.AVG,
-            SortByType.CURRENT,
-            SortByType.MAX,
-            SortByType.MIN,
-            SortByType.NAME,
-            SortByType.STDDEV,
-            SortByType.SUM };
+    public void testTopKPlanNodeFactoryWithValidSortFunctions() {
+        testSortFunction("avg", SortByType.AVG);
+        testSortFunction("current", SortByType.CURRENT);
+        testSortFunction("max", SortByType.MAX);
+        testSortFunction("min", SortByType.MIN);
+        testSortFunction("name", SortByType.NAME);
+        testSortFunction("stddev", SortByType.STDDEV);
+        testSortFunction("sum", SortByType.SUM);
+    }
 
-        for (int i = 0; i < validSortFunctions.length; i++) {
-            FunctionNode functionNode = new FunctionNode();
-            functionNode.setFunctionName("topK");
-            functionNode.addChildNode(new ValueNode("3"));
-            functionNode.addChildNode(new ValueNode(validSortFunctions[i]));
+    private void testSortFunction(String sortFunction, SortByType expectedSortBy) {
+        FunctionNode functionNode = new FunctionNode();
+        functionNode.setFunctionName("topK");
+        functionNode.addChildNode(new ValueNode("3"));
+        functionNode.addChildNode(new ValueNode(sortFunction));
 
-            TopKPlanNode node = TopKPlanNode.of(functionNode);
-            assertEquals(3, node.getK());
-            assertEquals(expectedSortByTypes[i], node.getSortBy());
-            assertEquals(SortOrderType.DESC, node.getSortOrder());
-        }
+        TopKPlanNode node = TopKPlanNode.of(functionNode);
+
+        assertEquals(3, node.getK());
+        assertEquals(expectedSortBy, node.getSortBy());
+        assertEquals(SortOrderType.DESC, node.getSortOrder());
     }
 
     // ========== Factory Method Tests - All Parameters ==========
@@ -180,25 +179,26 @@ public class TopKPlanNodeTests extends BasePlanNodeTests {
         assertEquals("TOPK(8, max, asc)", node.getExplainName());
     }
 
-    public void testTopKPlanNodeFactoryMethodWithAllValidSortOrders() {
-        String[] validOrders = { "asc", "desc" };
-        SortOrderType[] expectedOrderTypes = { SortOrderType.ASC, SortOrderType.DESC };
-
-        for (int i = 0; i < validOrders.length; i++) {
-            FunctionNode functionNode = new FunctionNode();
-            functionNode.setFunctionName("topK");
-            functionNode.addChildNode(new ValueNode("4"));
-            functionNode.addChildNode(new ValueNode("sum"));
-            functionNode.addChildNode(new ValueNode(validOrders[i]));
-
-            TopKPlanNode node = TopKPlanNode.of(functionNode);
-            assertEquals(4, node.getK());
-            assertEquals(SortByType.SUM, node.getSortBy());
-            assertEquals(expectedOrderTypes[i], node.getSortOrder());
-        }
+    public void testTopKPlanNodeFactoryWithValidSortOrders() {
+        testSortOrder("asc", SortOrderType.ASC);
+        testSortOrder("desc", SortOrderType.DESC);
     }
 
-    public void testTopKPlanNodeFactoryMethodWithAlternativeNames() {
+    private void testSortOrder(String orderStr, SortOrderType expectedOrder) {
+        FunctionNode functionNode = new FunctionNode();
+        functionNode.setFunctionName("topK");
+        functionNode.addChildNode(new ValueNode("4"));
+        functionNode.addChildNode(new ValueNode("sum"));
+        functionNode.addChildNode(new ValueNode(orderStr));
+
+        TopKPlanNode node = TopKPlanNode.of(functionNode);
+
+        assertEquals(4, node.getK());
+        assertEquals(SortByType.SUM, node.getSortBy());
+        assertEquals(expectedOrder, node.getSortOrder());
+    }
+
+    public void testTopKPlanNodeFactoryWithAlternativeNames() {
         // Test "average" instead of "avg"
         FunctionNode functionNode1 = new FunctionNode();
         functionNode1.setFunctionName("topK");
@@ -248,7 +248,7 @@ public class TopKPlanNodeTests extends BasePlanNodeTests {
         assertEquals("topK function accepts at most 3 arguments: k, sortBy, and sortOrder", exception.getMessage());
     }
 
-    public void testTopKPlanNodeFactoryMethodThrowsOnInvalidK() {
+    public void testTopKPlanNodeFactoryThrowsOnInvalidK() {
         // Invalid string k
         FunctionNode functionNode1 = new FunctionNode();
         functionNode1.setFunctionName("topK");
