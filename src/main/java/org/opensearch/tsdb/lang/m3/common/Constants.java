@@ -77,7 +77,6 @@ public class Constants {
             "switch",
             "tagCompare",
             "tail",
-            "topK",
             "timestamp",
             "toHistogram",
             "toHistogramLinearBuckets",
@@ -228,6 +227,11 @@ public class Constants {
          * sortSeries function name (alias for sort).
          */
         public static final String SORT_SERIES = "sortSeries";
+
+        /**
+         * topK function name.
+         */
+        public static final String TOP_K = "topK";
 
         /**
          * summarize function name.

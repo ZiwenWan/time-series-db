@@ -43,6 +43,7 @@ import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.SortPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.SustainPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.SummarizePlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.TimeshiftPlanNode;
+import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.TopKPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.TransformNullPlanNode;
 
 /**
@@ -114,6 +115,8 @@ public class M3PlanNodeFactory {
             case Constants.Functions.SORT:
             case Constants.Functions.SORT_SERIES:
                 return SortPlanNode.of(functionNode);
+            case Constants.Functions.TOP_K:
+                return TopKPlanNode.of(functionNode);
             case Constants.Functions.SUMMARIZE:
                 return SummarizePlanNode.of(functionNode);
             case Constants.Functions.SCALE:
