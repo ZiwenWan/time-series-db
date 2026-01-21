@@ -24,17 +24,25 @@ import org.apache.lucene.util.BytesRef;
 import org.opensearch.common.SuppressForbidden;
 import org.opensearch.common.lucene.index.OpenSearchDirectoryReader;
 import org.opensearch.core.index.shard.ShardId;
+import org.opensearch.telemetry.metrics.Counter;
+import org.opensearch.telemetry.metrics.Histogram;
+import org.opensearch.telemetry.metrics.MetricsRegistry;
+import org.opensearch.telemetry.metrics.tags.Tags;
 import org.opensearch.test.OpenSearchTestCase;
 import org.opensearch.tsdb.core.head.MemChunk;
 import org.opensearch.tsdb.core.index.ReaderManagerWithMetadata;
 import org.opensearch.tsdb.core.index.closed.ClosedChunkIndexManager;
 import org.opensearch.tsdb.core.index.live.MemChunkReader;
 import org.opensearch.tsdb.core.chunk.MMappedChunksManager;
+import org.opensearch.tsdb.metrics.TSDBMetrics;
+import org.opensearch.tsdb.metrics.TSDBMetricsConstants;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.opensearch.tsdb.core.mapping.LabelStorageType;
+import org.mockito.ArgumentCaptor;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -43,11 +51,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.anyLong;
+import static org.mockito.Mockito.anyString;
 import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -206,6 +219,8 @@ public class TSDBDirectoryReaderReferenceManagerTests extends OpenSearchTestCase
         if (closedDirectory3 != null) {
             closedDirectory3.close();
         }
+        // Cleanup TSDBMetrics to ensure isolation between tests
+        TSDBMetrics.cleanup();
         super.tearDown();
     }
 
@@ -843,5 +858,157 @@ public class TSDBDirectoryReaderReferenceManagerTests extends OpenSearchTestCase
         doc.add(new LongPoint("__mint__", mint));
         doc.add(new LongPoint("__maxt__", maxt));
         return doc;
+    }
+
+    @Test
+    public void testCloseReaderCapacityGaugesIsSafeToCallMultipleTimes() throws IOException {
+        when(closedChunkIndexManager.getReaderManagersWithMetadata()).thenReturn(Arrays.asList(closedReaderManager1));
+
+        referenceManager = new TSDBDirectoryReaderReferenceManager(
+            liveReaderManager,
+            () -> 0L,
+            closedChunkIndexManager,
+            memChunkReader,
+            labelStorageType,
+            mmappedChunksManager,
+            shardId
+        );
+
+        // Should not throw when called multiple times
+        referenceManager.closeReaderCapacityGauges();
+        referenceManager.closeReaderCapacityGauges();
+    }
+
+    @Test
+    public void testCloseReaderCapacityGaugesBeforeClose() throws IOException {
+        when(closedChunkIndexManager.getReaderManagersWithMetadata()).thenReturn(Arrays.asList(closedReaderManager1));
+
+        referenceManager = new TSDBDirectoryReaderReferenceManager(
+            liveReaderManager,
+            () -> 0L,
+            closedChunkIndexManager,
+            memChunkReader,
+            labelStorageType,
+            mmappedChunksManager,
+            shardId
+        );
+
+        // Verify we can acquire reader before closing gauges
+        withAcquiredReader((ReaderConsumer) reader -> assertNotNull(reader));
+
+        // Close gauges before closing reference manager
+        referenceManager.closeReaderCapacityGauges();
+
+        // Should still be able to acquire reader after closing gauges
+        withAcquiredReader((ReaderConsumer) reader -> assertNotNull(reader));
+
+        // Close reference manager
+        referenceManager.close();
+        referenceManager = null; // Prevent double-close in tearDown
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void testReaderCapacityGaugesRegistration() throws IOException {
+        // Setup mock metrics registry
+        MetricsRegistry mockRegistry = mock(MetricsRegistry.class);
+        when(mockRegistry.createCounter(anyString(), anyString(), anyString())).thenReturn(mock(Counter.class));
+        when(mockRegistry.createHistogram(anyString(), anyString(), anyString())).thenReturn(mock(Histogram.class));
+        when(mockRegistry.createGauge(anyString(), anyString(), anyString(), any(Supplier.class), any(Tags.class))).thenReturn(
+            mock(Closeable.class)
+        );
+
+        // Initialize TSDBMetrics with mock registry
+        TSDBMetrics.initialize(mockRegistry);
+
+        when(closedChunkIndexManager.getReaderManagersWithMetadata()).thenReturn(Arrays.asList(closedReaderManager1, closedReaderManager2));
+
+        // Create reference manager - this should register gauges
+        referenceManager = new TSDBDirectoryReaderReferenceManager(
+            liveReaderManager,
+            () -> 0L,
+            closedChunkIndexManager,
+            memChunkReader,
+            labelStorageType,
+            mmappedChunksManager,
+            shardId
+        );
+
+        // Verify gauges were registered with correct metric names
+        verify(mockRegistry).createGauge(
+            eq(TSDBMetricsConstants.READER_MAXDOC_UTILIZATION),
+            eq(TSDBMetricsConstants.READER_MAXDOC_UTILIZATION_DESC),
+            eq(TSDBMetricsConstants.UNIT_COUNT),
+            any(Supplier.class),
+            any(Tags.class)
+        );
+        verify(mockRegistry).createGauge(
+            eq(TSDBMetricsConstants.READER_CLOSED_INDICES),
+            eq(TSDBMetricsConstants.READER_CLOSED_INDICES_DESC),
+            eq(TSDBMetricsConstants.UNIT_COUNT),
+            any(Supplier.class),
+            any(Tags.class)
+        );
+        verify(mockRegistry).createGauge(
+            eq(TSDBMetricsConstants.READER_LEAF_COUNT),
+            eq(TSDBMetricsConstants.READER_LEAF_COUNT_DESC),
+            eq(TSDBMetricsConstants.UNIT_COUNT),
+            any(Supplier.class),
+            any(Tags.class)
+        );
+
+        // Verify exactly 3 gauges were registered
+        verify(mockRegistry, times(3)).createGauge(anyString(), anyString(), anyString(), any(Supplier.class), any(Tags.class));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void testReaderCapacityGaugeSupplierValues() throws IOException {
+        // Setup mock metrics registry and capture suppliers
+        MetricsRegistry mockRegistry = mock(MetricsRegistry.class);
+        when(mockRegistry.createCounter(anyString(), anyString(), anyString())).thenReturn(mock(Counter.class));
+        when(mockRegistry.createHistogram(anyString(), anyString(), anyString())).thenReturn(mock(Histogram.class));
+
+        ArgumentCaptor<Supplier<Double>> supplierCaptor = ArgumentCaptor.forClass(Supplier.class);
+        ArgumentCaptor<String> nameCaptor = ArgumentCaptor.forClass(String.class);
+        when(mockRegistry.createGauge(nameCaptor.capture(), anyString(), anyString(), supplierCaptor.capture(), any(Tags.class)))
+            .thenReturn(mock(Closeable.class));
+
+        // Initialize TSDBMetrics
+        TSDBMetrics.initialize(mockRegistry);
+
+        when(closedChunkIndexManager.getReaderManagersWithMetadata()).thenReturn(Arrays.asList(closedReaderManager1, closedReaderManager2));
+
+        referenceManager = new TSDBDirectoryReaderReferenceManager(
+            liveReaderManager,
+            () -> 0L,
+            closedChunkIndexManager,
+            memChunkReader,
+            labelStorageType,
+            mmappedChunksManager,
+            shardId
+        );
+
+        // Find and verify each gauge supplier
+        List<String> names = nameCaptor.getAllValues();
+        List<Supplier<Double>> suppliers = supplierCaptor.getAllValues();
+
+        for (int i = 0; i < names.size(); i++) {
+            String name = names.get(i);
+            Supplier<Double> supplier = suppliers.get(i);
+            Double value = supplier.get();
+
+            if (TSDBMetricsConstants.READER_MAXDOC_UTILIZATION.equals(name)) {
+                // Should be a small percentage (4 docs out of ~2.1B limit)
+                assertTrue("MaxDoc utilization should be >= 0", value >= 0.0);
+                assertTrue("MaxDoc utilization should be < 1% for test data", value < 1.0);
+            } else if (TSDBMetricsConstants.READER_CLOSED_INDICES.equals(name)) {
+                // Should be 2 (we have 2 closed chunk indices)
+                assertEquals("Should have 2 closed indices", 2.0, value, 0.001);
+            } else if (TSDBMetricsConstants.READER_LEAF_COUNT.equals(name)) {
+                // Should have at least 1 leaf reader
+                assertTrue("Should have at least 1 leaf reader", value >= 1.0);
+            }
+        }
     }
 }

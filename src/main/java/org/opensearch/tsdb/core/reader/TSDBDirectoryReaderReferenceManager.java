@@ -14,6 +14,7 @@ import org.apache.lucene.index.ReaderManager;
 import org.apache.lucene.search.ReferenceManager;
 import org.apache.lucene.store.AlreadyClosedException;
 import org.opensearch.common.SuppressForbidden;
+import org.opensearch.common.util.io.IOUtils;
 import org.opensearch.common.lucene.index.OpenSearchDirectoryReader;
 import org.opensearch.core.index.shard.ShardId;
 import org.opensearch.tsdb.core.mapping.LabelStorageType;
@@ -24,7 +25,11 @@ import org.opensearch.tsdb.core.index.closed.ClosedChunkIndexManager;
 import org.opensearch.tsdb.core.index.live.MemChunkReader;
 
 import org.opensearch.tsdb.metrics.TSDBMetrics;
+import org.opensearch.tsdb.metrics.TSDBMetricsConstants;
+import org.opensearch.telemetry.metrics.MetricsRegistry;
+import org.opensearch.telemetry.metrics.tags.Tags;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -55,6 +60,14 @@ public class TSDBDirectoryReaderReferenceManager extends ReferenceManager<OpenSe
     private volatile List<ReaderManagerWithMetadata> closedChunkIndexReaderManagers;
 
     private volatile long lastRefreshNanos = System.nanoTime();
+
+    /** Lucene's hard limit for maxDoc (Integer.MAX_VALUE - 128) */
+    private static final long LUCENE_MAX_DOC_LIMIT = Integer.MAX_VALUE - 128;
+
+    /** Gauge handles for reader capacity metrics */
+    private Closeable readerMaxDocUtilizationGauge;
+    private Closeable readerClosedIndicesGauge;
+    private Closeable readerLeafCountGauge;
 
     /**
      * Creates a new TSDBDirectoryReaderReferenceManager.
@@ -101,6 +114,9 @@ public class TSDBDirectoryReaderReferenceManager extends ReferenceManager<OpenSe
             ),
             shardId
         );
+
+        // Register reader capacity gauges
+        registerReaderCapacityGauges();
     }
 
     private TSDBDirectoryReader creatNewTSDBDirectoryReader(
@@ -193,7 +209,6 @@ public class TSDBDirectoryReaderReferenceManager extends ReferenceManager<OpenSe
                     minLiveTimestampSupplier,
                     closedChunkIndexManager,
                     memChunkReader,
-
                     currentMmappedChunks,
                     mMappedChunksManager,
                     labelStorageType,
@@ -239,6 +254,57 @@ public class TSDBDirectoryReaderReferenceManager extends ReferenceManager<OpenSe
         // intervalNanos is always positive since nanoTime is monotonic
         TSDBMetrics.recordHistogram(TSDBMetrics.ENGINE.refreshInterval, intervalNanos / 1_000_000.0);
         lastRefreshNanos = currentNanos;
+    }
+
+    /**
+     * Registers pull-based gauge metrics for reader capacity monitoring.
+     * Gauges read current values from `this.current` when scraped.
+     */
+    private void registerReaderCapacityGauges() {
+        MetricsRegistry registry = TSDBMetrics.getRegistry();
+        if (registry == null) {
+            return;
+        }
+
+        Tags tags = Tags.create().addTag("index", shardId.getIndexName()).addTag("shard", shardId.id());
+
+        readerMaxDocUtilizationGauge = registry.createGauge(
+            TSDBMetricsConstants.READER_MAXDOC_UTILIZATION,
+            TSDBMetricsConstants.READER_MAXDOC_UTILIZATION_DESC,
+            TSDBMetricsConstants.UNIT_COUNT,
+            () -> {
+                long maxDoc = current.maxDoc();
+                return (maxDoc * 100.0) / LUCENE_MAX_DOC_LIMIT;
+            },
+            tags
+        );
+
+        readerClosedIndicesGauge = registry.createGauge(
+            TSDBMetricsConstants.READER_CLOSED_INDICES,
+            TSDBMetricsConstants.READER_CLOSED_INDICES_DESC,
+            TSDBMetricsConstants.UNIT_COUNT,
+            () -> (double) closedChunkIndexReaderManagers.size(),
+            tags
+        );
+
+        readerLeafCountGauge = registry.createGauge(
+            TSDBMetricsConstants.READER_LEAF_COUNT,
+            TSDBMetricsConstants.READER_LEAF_COUNT_DESC,
+            TSDBMetricsConstants.UNIT_COUNT,
+            () -> (double) current.leaves().size(),
+            tags
+        );
+    }
+
+    /**
+     * Closes gauge handles to unregister callbacks.
+     * Should be called before closing the reference manager.
+     */
+    public void closeReaderCapacityGauges() {
+        IOUtils.closeWhileHandlingException(readerMaxDocUtilizationGauge, readerClosedIndicesGauge, readerLeafCountGauge);
+        readerMaxDocUtilizationGauge = null;
+        readerClosedIndicesGauge = null;
+        readerLeafCountGauge = null;
     }
 
     @Override

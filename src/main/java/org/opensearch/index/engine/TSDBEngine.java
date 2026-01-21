@@ -113,7 +113,7 @@ public class TSDBEngine extends Engine {
 
     private Head head;
     private Path metricsStorePath;
-    private ReferenceManager<OpenSearchDirectoryReader> tsdbReaderManager;
+    private TSDBDirectoryReaderReferenceManager tsdbReaderManager;
     private final MetadataStore metadataStore;
     private final MMappedChunksManager mappedChunksManager;
 
@@ -245,6 +245,9 @@ public class TSDBEngine extends Engine {
     @Override
     public void close() throws IOException {
         metricsStorePath = null;
+        if (tsdbReaderManager != null) {
+            tsdbReaderManager.closeReaderCapacityGauges();
+        }
         IOUtils.close(head, translogManager, tsdbReaderManager, metadataIndexWriter);
         super.close();
     }
@@ -1344,7 +1347,7 @@ public class TSDBEngine extends Engine {
      * Creates and returns a TSDB directory reader reference manager that aggregates
      * readers from both the live series index and closed chunk indexes.
      */
-    private ReferenceManager<OpenSearchDirectoryReader> getTSDBReaderManager() {
+    private TSDBDirectoryReaderReferenceManager getTSDBReaderManager() {
         try {
             return new TSDBDirectoryReaderReferenceManager(
                 head.getLiveSeriesIndex().getDirectoryReaderManager(),

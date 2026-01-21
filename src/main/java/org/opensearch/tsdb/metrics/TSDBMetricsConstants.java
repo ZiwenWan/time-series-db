@@ -136,6 +136,19 @@ public final class TSDBMetricsConstants {
     public static final String REFRESH_INTERVAL = "tsdb.refresh.interval";
 
     // ============================================
+    // Reader Metrics (Document Limits, Capacity)
+    // ============================================
+
+    /** Gauge: Percentage of Lucene's document limit used (0-100+) */
+    public static final String READER_MAXDOC_UTILIZATION = "tsdb.reader.maxdoc.utilization";
+
+    /** Gauge: Number of closed chunk indices currently loaded */
+    public static final String READER_CLOSED_INDICES = "tsdb.reader.closed_indices";
+
+    /** Gauge: Number of leaf readers in TSDBDirectoryReader */
+    public static final String READER_LEAF_COUNT = "tsdb.reader.leaf_count";
+
+    // ============================================
     // Index Metrics (Retention, Compaction)
     // ============================================
 
@@ -226,6 +239,11 @@ public final class TSDBMetricsConstants {
 
     // Refresh/Visibility Metrics
     public static final String REFRESH_INTERVAL_DESC = "Time between NRT refreshes (new series visibility lag)";
+
+    // Reader Metrics
+    public static final String READER_MAXDOC_UTILIZATION_DESC = "Percentage of Lucene's document limit used (0-100+)";
+    public static final String READER_CLOSED_INDICES_DESC = "Number of closed chunk indices currently loaded";
+    public static final String READER_LEAF_COUNT_DESC = "Number of leaf readers in TSDBDirectoryReader";
 
     // Index Metrics
     public static final String INDEX_CREATED_TOTAL_DESC = "Total number of closed chunk indexes created";
