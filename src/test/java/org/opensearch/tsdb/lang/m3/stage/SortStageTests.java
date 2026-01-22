@@ -711,7 +711,7 @@ public class SortStageTests extends AbstractWireSerializingTestCase<SortStage> {
 
     public void testSupportConcurrentSegmentSearch() {
         SortStage sortStage = new SortStage(SortByType.AVG);
-        assertTrue(sortStage.supportConcurrentSegmentSearch());
+        assertFalse(sortStage.supportConcurrentSegmentSearch());
     }
 
     // ========== Edge Cases and Error Handling ==========

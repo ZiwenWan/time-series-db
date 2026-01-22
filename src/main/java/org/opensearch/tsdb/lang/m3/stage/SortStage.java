@@ -349,11 +349,6 @@ public class SortStage implements UnaryPipelineStage {
     }
 
     @Override
-    public boolean supportConcurrentSegmentSearch() {
-        return true;
-    }
-
-    @Override
     public boolean equals(Object obj) {
         if (this == obj) {
             return true;
