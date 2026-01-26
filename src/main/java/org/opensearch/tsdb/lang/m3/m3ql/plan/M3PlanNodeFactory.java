@@ -126,6 +126,7 @@ public class M3PlanNodeFactory {
             case Constants.Functions.TRANSFORM_NULL:
                 return TransformNullPlanNode.of(functionNode);
             case Constants.Functions.LOGARITHM:
+            case Constants.Functions.LOG:
                 return LogarithmPlanNode.of(functionNode);
             case Constants.Functions.SQRT:
             case Constants.Functions.SQUARE_ROOT:

@@ -68,7 +68,11 @@ public class OffsetPlanNode extends M3PlanNode {
         if (!(childNodes.getFirst() instanceof ValueNode valueNode)) {
             throw new IllegalArgumentException("Offset argument must be a value");
         }
-        double value = Double.parseDouble(valueNode.getValue());
-        return new OffsetPlanNode(M3PlannerContext.generateId(), value);
+        try {
+            double value = Double.parseDouble(valueNode.getValue());
+            return new OffsetPlanNode(M3PlannerContext.generateId(), value);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Invalid numeric value for offset function: " + valueNode.getValue(), e);
+        }
     }
 }

@@ -109,7 +109,7 @@ public class OffsetPlanNodeTests extends BasePlanNodeTests {
         functionNode.setFunctionName("offset");
         functionNode.addChildNode(new ValueNode("not_a_number"));
 
-        expectThrows(NumberFormatException.class, () -> OffsetPlanNode.of(functionNode));
+        expectThrows(IllegalArgumentException.class, () -> OffsetPlanNode.of(functionNode));
     }
 
     public void testOffsetPlanNodeChildrenManagement() {

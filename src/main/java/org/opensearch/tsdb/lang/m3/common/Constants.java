@@ -267,6 +267,11 @@ public class Constants {
         public static final String LOGARITHM = "logarithm";
 
         /**
+         * log function alias for logarithm.
+         */
+        public static final String LOG = "log";
+
+        /**
          * sqrt function name.
          */
         public static final String SQRT = "sqrt";
