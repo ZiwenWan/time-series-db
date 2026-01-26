@@ -54,7 +54,8 @@
           },
           {
             "type" : "headTail",
-            "limit" : 5
+            "limit" : 5,
+            "mode" : "head"
           }
         ],
         "references" : {

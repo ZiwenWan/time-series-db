@@ -44,6 +44,8 @@ public class HeadTailStage implements UnaryPipelineStage {
     public static final String NAME = "headTail";
     /** The argument name for limit parameter. */
     public static final String LIMIT_ARG = "limit";
+    /** The argument name for mode parameter. */
+    public static final String MODE_ARG = "mode";
 
     private final int limit;
     private final HeadTailMode mode;
@@ -155,6 +157,7 @@ public class HeadTailStage implements UnaryPipelineStage {
     @Override
     public void toXContent(XContentBuilder builder, ToXContent.Params params) throws IOException {
         builder.field(LIMIT_ARG, limit);
+        builder.field(MODE_ARG, mode.getDisplayName());
     }
 
     @Override
@@ -190,6 +193,32 @@ public class HeadTailStage implements UnaryPipelineStage {
             throw new IllegalArgumentException("Mode cannot be null");
         }
 
+        int limit = parseLimit(args);
+        return new HeadTailStage(limit, mode);
+    }
+
+    /**
+     * Create a HeadTailStage from arguments map (for PipelineStageFactory compatibility).
+     * Reads mode from args, defaults to HEAD mode for backward compatibility.
+     *
+     * @param args Map of argument names to values
+     * @return HeadTailStage instance
+     * @throws IllegalArgumentException if arguments are invalid
+     */
+    public static HeadTailStage fromArgs(Map<String, Object> args) {
+        int limit = parseLimit(args);
+        HeadTailMode mode = parseMode(args);
+        return new HeadTailStage(limit, mode);
+    }
+
+    /**
+     * Parse limit from arguments map.
+     *
+     * @param args Map of argument names to values
+     * @return The parsed limit (defaults to 10)
+     * @throws IllegalArgumentException if limit is invalid
+     */
+    private static int parseLimit(Map<String, Object> args) {
         int limit = 10; // Default limit
         if (args != null && !args.isEmpty()) {
             Object limitObj = args.get(LIMIT_ARG);
@@ -215,20 +244,31 @@ public class HeadTailStage implements UnaryPipelineStage {
                 }
             }
         }
-
-        return new HeadTailStage(limit, mode);
+        return limit;
     }
 
     /**
-     * Create a HeadTailStage from arguments map (for PipelineStageFactory compatibility).
-     * Defaults to HEAD mode for backward compatibility.
+     * Parse mode from arguments map.
      *
      * @param args Map of argument names to values
-     * @return HeadTailStage instance with HEAD mode
-     * @throws IllegalArgumentException if arguments are invalid
+     * @return The parsed mode (defaults to HEAD for backward compatibility)
+     * @throws IllegalArgumentException if mode is invalid
      */
-    public static HeadTailStage fromArgs(Map<String, Object> args) {
-        return fromArgs(args, HeadTailMode.HEAD);
+    private static HeadTailMode parseMode(Map<String, Object> args) {
+        HeadTailMode mode = HeadTailMode.HEAD; // Default for backward compatibility
+        if (args != null && !args.isEmpty()) {
+            Object modeObj = args.get(MODE_ARG);
+            if (modeObj != null) {
+                if (modeObj instanceof String modeStr) {
+                    mode = HeadTailMode.fromString(modeStr);
+                } else {
+                    throw new IllegalArgumentException(
+                        "Invalid type for '" + MODE_ARG + "' argument. Expected String, but got " + modeObj.getClass().getSimpleName()
+                    );
+                }
+            }
+        }
+        return mode;
     }
 
     @Override

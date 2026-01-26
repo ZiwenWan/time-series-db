@@ -105,6 +105,34 @@ public class HeadTailStageTests extends AbstractWireSerializingTestCase<HeadTail
         assertEquals(HeadTailMode.HEAD, stage.getMode()); // Should default to HEAD mode
     }
 
+    public void testFromArgsWithExplicitMode() {
+        Map<String, Object> args = Map.of("limit", 5, "mode", "tail");
+        HeadTailStage stage = HeadTailStage.fromArgs(args);
+        assertEquals(5, stage.getLimit());
+        assertEquals(HeadTailMode.TAIL, stage.getMode());
+    }
+
+    public void testFromArgsWithExplicitHeadMode() {
+        Map<String, Object> args = Map.of("limit", 3, "mode", "head");
+        HeadTailStage stage = HeadTailStage.fromArgs(args);
+        assertEquals(3, stage.getLimit());
+        assertEquals(HeadTailMode.HEAD, stage.getMode());
+    }
+
+    public void testFromArgsWithInvalidMode() {
+        Map<String, Object> args = Map.of("limit", 5, "mode", "invalid");
+        HeadTailStage stage = HeadTailStage.fromArgs(args);
+        // HeadTailMode.fromString defaults to HEAD for invalid strings
+        assertEquals(5, stage.getLimit());
+        assertEquals(HeadTailMode.HEAD, stage.getMode());
+    }
+
+    public void testFromArgsWithInvalidModeType() {
+        Map<String, Object> args = Map.of("limit", 5, "mode", 123);
+        IllegalArgumentException e = expectThrows(IllegalArgumentException.class, () -> HeadTailStage.fromArgs(args));
+        assertEquals("Invalid type for 'mode' argument. Expected String, but got Integer", e.getMessage());
+    }
+
     public void testIsCoordinatorOnly() {
         HeadTailStage stage = new HeadTailStage(5, HeadTailMode.HEAD);
         assertFalse(stage.isCoordinatorOnly());
