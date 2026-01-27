@@ -19,21 +19,25 @@ import java.util.Locale;
 
 /**
  * AliasByBucketPlanNode represents a node in the M3QL plan that renames series based on histogram bucket bounds.
- * Takes an optional tag name parameter (defaults to common bucket tag names if not provided).
+ * Requires an explicit tag name parameter containing bucket range information.
  * Supports both 'aliasByBucket' and 'aliasByHistogramBucket' function names.
  */
 public class AliasByBucketPlanNode extends M3PlanNode {
-    private final String tagName; // null means use default bucket tag names
+    private final String tagName; // required tag name for bucket information
 
     /**
      * Constructor for AliasByBucketPlanNode.
      *
      * @param id node id
-     * @param tagName the tag name containing bucket information (can be null to use defaults)
+     * @param tagName the tag name containing bucket information (required, cannot be null)
+     * @throws IllegalArgumentException if tagName is null or empty
      */
     public AliasByBucketPlanNode(int id, String tagName) {
         super(id);
-        this.tagName = tagName;
+        if (tagName == null || tagName.trim().isEmpty()) {
+            throw new IllegalArgumentException("Tag name is required for AliasByBucket plan node");
+        }
+        this.tagName = tagName.trim();
     }
 
     @Override
@@ -43,16 +47,12 @@ public class AliasByBucketPlanNode extends M3PlanNode {
 
     @Override
     public String getExplainName() {
-        if (tagName != null) {
-            return String.format(Locale.ROOT, "ALIAS_BY_BUCKET(%s)", tagName);
-        } else {
-            return "ALIAS_BY_BUCKET(auto)";
-        }
+        return String.format(Locale.ROOT, "ALIAS_BY_BUCKET(%s)", tagName);
     }
 
     /**
      * Returns the tag name used for bucket aliasing.
-     * @return tag name, or null if using auto-detection
+     * @return tag name (never null)
      */
     public String getTagName() {
         return tagName;
@@ -60,18 +60,16 @@ public class AliasByBucketPlanNode extends M3PlanNode {
 
     /**
      * Factory method to create an AliasByBucketPlanNode from a FunctionNode.
-     * Expects the function node to have zero or one child that is a ValueNode representing the tag name.
+     * Expects the function node to have exactly one child that is a ValueNode representing the tag name.
      *
      * @param functionNode the function node to convert
      * @return an instance of AliasByBucketPlanNode
+     * @throws IllegalArgumentException if the function doesn't have exactly one argument or argument is not a ValueNode
      */
     public static AliasByBucketPlanNode of(FunctionNode functionNode) {
         List<M3ASTNode> childNodes = functionNode.getChildren();
-        if (childNodes.size() > 1) {
-            throw new IllegalArgumentException("AliasByBucket function expects no more than one argument");
-        } else if (childNodes.isEmpty()) {
-            // No argument provided, use auto-detection
-            return new AliasByBucketPlanNode(M3PlannerContext.generateId(), null);
+        if (childNodes.size() != 1) {
+            throw new IllegalArgumentException("AliasByBucket function requires exactly one argument (tag name)");
         }
 
         M3ASTNode child = childNodes.getFirst();

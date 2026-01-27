@@ -74,16 +74,18 @@ public class M3PlanNodeFactoryTests extends OpenSearchTestCase {
 
     public void testCreateAliasByHistogramBucketPlanNode() {
         FunctionNode functionNode = mock(FunctionNode.class);
+        ValueNode tagNode = mock(ValueNode.class);
 
         when(functionNode.getFunctionName()).thenReturn("aliasByHistogramBucket");
-        when(functionNode.getChildren()).thenReturn(List.of());
+        when(functionNode.getChildren()).thenReturn(List.of(tagNode));
+        when(tagNode.getValue()).thenReturn("\"bucket\"");
 
         M3PlanNode result = M3PlanNodeFactory.create(functionNode);
 
         assertNotNull(result);
         assertTrue(result instanceof AliasByBucketPlanNode);
         AliasByBucketPlanNode bucketNode = (AliasByBucketPlanNode) result;
-        assertNull(bucketNode.getTagName());
+        assertEquals("bucket", bucketNode.getTagName());
     }
 
     public void testCreateAliasByDistinctTagsPlanNode() {

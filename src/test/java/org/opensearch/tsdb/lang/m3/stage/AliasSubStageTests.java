@@ -81,6 +81,16 @@ public class AliasSubStageTests extends AbstractWireSerializingTestCase<AliasSub
         assertEquals("replaced", stage.getReplacement());
     }
 
+    public void testGetName() {
+        AliasSubStage stage = new AliasSubStage("pattern", "replacement");
+        assertEquals("aliasSub", stage.getName());
+    }
+
+    public void testNullInputThrowsException() {
+        AliasSubStage stage = new AliasSubStage("pattern", "replacement");
+        assertThrows(NullPointerException.class, () -> stage.process(null));
+    }
+
     public void testXContentSerialization() throws Exception {
         AliasSubStage stage = new AliasSubStage("(.+)", "$1_suffix");
         XContentBuilder builder = XContentFactory.jsonBuilder();

@@ -54,19 +54,20 @@ public class AliasByBucketStageTests extends AbstractWireSerializingTestCase<Ali
         assertEquals("10", result.get(0).getAlias()); // Fallback to lower bound
     }
 
-    public void testAutoDetection() {
-        AliasByBucketStage stage = new AliasByBucketStage(null);
-        TimeSeries ts = new TimeSeries(
-            List.of(new FloatSample(10L, 1.0)),
-            ByteLabels.fromStrings("le", "42", "other", "value"),
-            10L,
-            10L,
-            10L,
-            null
-        );
+    public void testConstructorRequiresTagName() {
+        assertThrows(IllegalArgumentException.class, () -> new AliasByBucketStage(null));
+        assertThrows(IllegalArgumentException.class, () -> new AliasByBucketStage(""));
+        assertThrows(IllegalArgumentException.class, () -> new AliasByBucketStage("   "));
+    }
 
-        List<TimeSeries> result = stage.process(List.of(ts));
-        assertEquals("42", result.get(0).getAlias());
+    public void testGetName() {
+        AliasByBucketStage stage = new AliasByBucketStage("bucket");
+        assertEquals("aliasByBucket", stage.getName());
+    }
+
+    public void testNullInputThrowsException() {
+        AliasByBucketStage stage = new AliasByBucketStage("bucket");
+        assertThrows(NullPointerException.class, () -> stage.process(null));
     }
 
     public void testNoBucketTag() {
@@ -81,8 +82,9 @@ public class AliasByBucketStageTests extends AbstractWireSerializingTestCase<Ali
         AliasByBucketStage stage = AliasByBucketStage.fromArgs(Map.of("tag_name", "bucket"));
         assertEquals("bucket", stage.getTagName());
 
-        AliasByBucketStage defaultStage = AliasByBucketStage.fromArgs(null);
-        assertNull(defaultStage.getTagName());
+        // Test missing argument
+        assertThrows(IllegalArgumentException.class, () -> AliasByBucketStage.fromArgs(null));
+        assertThrows(IllegalArgumentException.class, () -> AliasByBucketStage.fromArgs(Map.of()));
     }
 
     public void testFactoryCreation() {
@@ -104,7 +106,7 @@ public class AliasByBucketStageTests extends AbstractWireSerializingTestCase<Ali
 
     @Override
     protected AliasByBucketStage createTestInstance() {
-        return new AliasByBucketStage(randomBoolean() ? randomAlphaOfLength(5) : null);
+        return new AliasByBucketStage(randomAlphaOfLength(5));
     }
 
     @Override
@@ -114,6 +116,6 @@ public class AliasByBucketStageTests extends AbstractWireSerializingTestCase<Ali
 
     @Override
     protected AliasByBucketStage mutateInstance(AliasByBucketStage instance) {
-        return new AliasByBucketStage(instance.getTagName() == null ? "mutated" : null);
+        return new AliasByBucketStage(instance.getTagName() + "_mutated");
     }
 }
