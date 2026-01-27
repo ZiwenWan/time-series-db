@@ -181,23 +181,6 @@ public class HeadTailStage implements UnaryPipelineStage {
     }
 
     /**
-     * Create a HeadTailStage from arguments map with specified mode.
-     *
-     * @param args Map of argument names to values
-     * @param mode The operation mode (HEAD or TAIL) - required
-     * @return HeadTailStage instance
-     * @throws IllegalArgumentException if arguments are invalid or mode is null
-     */
-    public static HeadTailStage fromArgs(Map<String, Object> args, HeadTailMode mode) {
-        if (mode == null) {
-            throw new IllegalArgumentException("Mode cannot be null");
-        }
-
-        int limit = parseLimit(args);
-        return new HeadTailStage(limit, mode);
-    }
-
-    /**
      * Create a HeadTailStage from arguments map (for PipelineStageFactory compatibility).
      * Reads mode from args, defaults to HEAD mode for backward compatibility.
      *
