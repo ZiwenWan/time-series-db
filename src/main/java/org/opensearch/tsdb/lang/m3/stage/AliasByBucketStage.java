@@ -19,14 +19,13 @@ import org.opensearch.tsdb.lang.m3.utils.BucketParsingUtils;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
 /**
  * A pipeline stage that creates aliases based on histogram bucket bounds.
- * Takes an optional tag name parameter (defaults to common bucket tag names if not provided).
+ * Requires an explicit tag name parameter containing bucket range information.
  * Extracts the bucket range from the specified tag, parses it, and uses the upper bound
  * (or lower bound for infinity cases) as the alias. Duration buckets are converted to milliseconds.
  *
@@ -43,24 +42,19 @@ public class AliasByBucketStage implements UnaryPipelineStage {
 
     private static final String TAG_NAME_ARG = "tag_name";
 
-    // Common bucket tag names to try if no tag name is specified
-    private static final List<String> DEFAULT_BUCKET_TAG_NAMES = Arrays.asList(
-        "le",
-        "bucket",
-        "bucketRange",
-        "bucket_range",
-        "upper_bound"
-    );
-
     private final String tagName;
 
     /**
      * Creates a new AliasByBucketStage with the specified tag name.
      *
-     * @param tagName the tag name containing bucket range information (can be null to use defaults)
+     * @param tagName the tag name containing bucket range information (required, cannot be null or empty)
+     * @throws IllegalArgumentException if tagName is null or empty
      */
     public AliasByBucketStage(String tagName) {
-        this.tagName = tagName;
+        if (tagName == null || tagName.trim().isEmpty()) {
+            throw new IllegalArgumentException("Tag name is required for AliasByBucket stage");
+        }
+        this.tagName = tagName.trim();
     }
 
     @Override
@@ -132,26 +126,13 @@ public class AliasByBucketStage implements UnaryPipelineStage {
     }
 
     /**
-     * Get the bucket range value from labels, trying the specified tag name or defaults.
+     * Get the bucket range value from labels using the explicitly specified tag name.
      *
      * @param labels the labels to search
      * @return the bucket range value, or null if not found
      */
     private String getBucketRangeValue(Labels labels) {
-        if (tagName != null && !tagName.isEmpty()) {
-            // Use the specified tag name
-            return labels.get(tagName);
-        } else {
-            // Try default tag names
-            Map<String, String> labelsMap = labels.toMapView();
-            for (String defaultTagName : DEFAULT_BUCKET_TAG_NAMES) {
-                String value = labelsMap.get(defaultTagName);
-                if (value != null && !value.isEmpty()) {
-                    return value;
-                }
-            }
-            return null;
-        }
+        return labels.get(tagName);
     }
 
     /**
@@ -173,14 +154,12 @@ public class AliasByBucketStage implements UnaryPipelineStage {
 
     @Override
     public void toXContent(XContentBuilder builder, ToXContent.Params params) throws IOException {
-        if (tagName != null) {
-            builder.field(TAG_NAME_ARG, tagName);
-        }
+        builder.field(TAG_NAME_ARG, tagName);
     }
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
-        out.writeOptionalString(tagName);
+        out.writeString(tagName);
     }
 
     /**
@@ -191,7 +170,7 @@ public class AliasByBucketStage implements UnaryPipelineStage {
      * @throws IOException if an I/O error occurs while reading
      */
     public static AliasByBucketStage readFrom(StreamInput in) throws IOException {
-        String tagName = in.readOptionalString();
+        String tagName = in.readString();
         return new AliasByBucketStage(tagName);
     }
 
@@ -200,10 +179,11 @@ public class AliasByBucketStage implements UnaryPipelineStage {
      *
      * @param args a map containing the arguments required to construct an AliasByBucketStage instance
      * @return a new AliasByBucketStage instance initialized with the provided parameters
+     * @throws IllegalArgumentException if required tag_name argument is missing
      */
     public static AliasByBucketStage fromArgs(Map<String, Object> args) {
-        if (args == null) {
-            return new AliasByBucketStage(null); // No tag name specified, use defaults
+        if (args == null || !args.containsKey(TAG_NAME_ARG)) {
+            throw new IllegalArgumentException("Tag name argument '" + TAG_NAME_ARG + "' is required for AliasByBucket stage");
         }
 
         String tagName = (String) args.get(TAG_NAME_ARG);
@@ -226,7 +206,7 @@ public class AliasByBucketStage implements UnaryPipelineStage {
     /**
      * Gets the tag name used by this stage.
      *
-     * @return the tag name, or null if using defaults
+     * @return the tag name (never null)
      */
     public String getTagName() {
         return tagName;

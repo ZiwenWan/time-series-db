@@ -27,12 +27,10 @@ public class AliasByBucketPlanNodeTests extends BasePlanNodeTests {
         assertEquals("ALIAS_BY_BUCKET(le)", node.getExplainName());
     }
 
-    public void testAliasByBucketPlanNodeAutoDetection() {
-        AliasByBucketPlanNode node = new AliasByBucketPlanNode(1, null);
-
-        assertEquals(1, node.getId());
-        assertNull(node.getTagName());
-        assertEquals("ALIAS_BY_BUCKET(auto)", node.getExplainName());
+    public void testAliasByBucketPlanNodeRequiresTagName() {
+        assertThrows(IllegalArgumentException.class, () -> new AliasByBucketPlanNode(1, null));
+        assertThrows(IllegalArgumentException.class, () -> new AliasByBucketPlanNode(1, ""));
+        assertThrows(IllegalArgumentException.class, () -> new AliasByBucketPlanNode(1, "   "));
     }
 
     public void testFactoryMethodWithArg() {
@@ -51,9 +49,7 @@ public class AliasByBucketPlanNodeTests extends BasePlanNodeTests {
         FunctionNode functionNode = mock(FunctionNode.class);
         when(functionNode.getChildren()).thenReturn(List.of());
 
-        AliasByBucketPlanNode node = AliasByBucketPlanNode.of(functionNode);
-
-        assertNull(node.getTagName());
+        assertThrows(IllegalArgumentException.class, () -> AliasByBucketPlanNode.of(functionNode));
     }
 
     public void testFactoryMethodTooManyArgs() {

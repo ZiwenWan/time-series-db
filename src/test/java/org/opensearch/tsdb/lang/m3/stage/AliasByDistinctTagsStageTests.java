@@ -93,6 +93,16 @@ public class AliasByDistinctTagsStageTests extends AbstractWireSerializingTestCa
         assertTrue(stage.isIncludeKeys());
     }
 
+    public void testGetName() {
+        AliasByDistinctTagsStage stage = new AliasByDistinctTagsStage(false, null);
+        assertEquals("aliasByDistinctTags", stage.getName());
+    }
+
+    public void testNullInputThrowsException() {
+        AliasByDistinctTagsStage stage = new AliasByDistinctTagsStage(false, null);
+        assertThrows(NullPointerException.class, () -> stage.process(null));
+    }
+
     public void testXContentSerialization() throws Exception {
         AliasByDistinctTagsStage stage = new AliasByDistinctTagsStage(true, List.of("env"));
         XContentBuilder builder = XContentFactory.jsonBuilder();
