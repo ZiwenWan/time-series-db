@@ -59,39 +59,68 @@ public class ChangedStage implements UnaryPipelineStage {
         List<TimeSeries> result = new ArrayList<>(input.size());
 
         for (TimeSeries ts : input) {
-            List<Sample> samples = ts.getSamples();
-            if (samples.isEmpty()) {
-                result.add(ts);
-                continue;
-            }
-
-            List<Sample> changedSamples = new ArrayList<>(samples.size());
-            Double lastNonNullValue = null;
-
-            for (Sample sample : samples) {
-                long timestamp = sample.getTimestamp();
-                double currentValue = sample.getValue();
-
-                double outputValue;
-
-                if (Double.isNaN(currentValue)) {
-                    // Current value is null/NaN: output 0
-                    outputValue = 0.0;
-                } else {
-                    // Current value is not null/NaN: compare with prior value
-                    outputValue = (lastNonNullValue != null && currentValue != lastNonNullValue) ? 1.0 : 0.0;
-                    lastNonNullValue = currentValue;
-                }
-
-                changedSamples.add(new FloatSample(timestamp, outputValue));
-            }
-
-            result.add(
-                new TimeSeries(changedSamples, ts.getLabels(), ts.getMinTimestamp(), ts.getMaxTimestamp(), ts.getStep(), ts.getAlias())
-            );
+            result.add(processSeries(ts));
         }
 
         return result;
+    }
+
+    /**
+     * Process a single time series to detect changes.
+     * Iterates through all expected timestamps in the range [minTimestamp, maxTimestamp]
+     * with step increments. Missing samples are treated as null/NaN and emit 0.
+     */
+    private TimeSeries processSeries(TimeSeries series) {
+        long minTimestamp = series.getMinTimestamp();
+        long maxTimestamp = series.getMaxTimestamp();
+        long stepSize = series.getStep();
+        List<Sample> samples = series.getSamples();
+
+        // Calculate total number of expected timestamps
+        int numSteps = (int) ((maxTimestamp - minTimestamp) / stepSize) + 1;
+        List<Sample> changedSamples = new ArrayList<>(numSteps);
+
+        // Track last non-null value for comparison
+        Double lastNonNullValue = null;
+
+        // Pointer to current position in sparse samples list
+        int sampleIdx = 0;
+
+        // Iterate through all expected timestamps
+        for (long timestamp = minTimestamp; timestamp <= maxTimestamp; timestamp += stepSize) {
+            // Check if we have a sample at this timestamp
+            Double currentValue = null;
+            if (sampleIdx < samples.size()) {
+                Sample sample = samples.get(sampleIdx);
+                if (sample != null && sample.getTimestamp() == timestamp) {
+                    double value = sample.getValue();
+                    currentValue = Double.isNaN(value) ? null : value;
+                    sampleIdx++; // Move to next sample
+                }
+            }
+
+            double outputValue;
+
+            if (currentValue == null) {
+                // Current value is null/NaN or missing: output 0
+                outputValue = 0.0;
+            } else {
+                // Current value is not null/NaN: compare with prior value
+                outputValue = (lastNonNullValue != null && !currentValue.equals(lastNonNullValue)) ? 1.0 : 0.0;
+                lastNonNullValue = currentValue;
+            }
+
+            changedSamples.add(new FloatSample(timestamp, outputValue));
+        }
+
+        return new TimeSeries(
+            changedSamples,
+            series.getLabels(),
+            series.getMinTimestamp(),
+            series.getMaxTimestamp(),
+            series.getStep(),
+            series.getAlias()
+        );
     }
 
     @Override

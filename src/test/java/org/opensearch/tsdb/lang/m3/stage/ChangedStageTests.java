@@ -122,7 +122,11 @@ public class ChangedStageTests extends AbstractWireSerializingTestCase<ChangedSt
         List<TimeSeries> result = stage.process(input);
 
         assertEquals(1, result.size());
-        assertTrue(result.get(0).getSamples().isEmpty());
+        // With new behavior, even with no input samples, we generate output for expected timestamps
+        List<Sample> expectedSamples = List.of(
+            new FloatSample(1000L, 0.0) // missing sample at timestamp 1000L -> 0
+        );
+        assertSamplesEqual("Empty input samples", expectedSamples, result.get(0).getSamples());
     }
 
     public void testProcessTransitionFromNaN() {
@@ -149,6 +153,80 @@ public class ChangedStageTests extends AbstractWireSerializingTestCase<ChangedSt
         assertSamplesEqual("Transition from NaN", expectedSamples, result.get(0).getSamples());
     }
 
+    public void testProcessWithMissingSamples() {
+        ChangedStage stage = new ChangedStage();
+        ByteLabels labels = ByteLabels.fromStrings("name", "sparse");
+
+        // Sparse input: missing samples at 2000L and 4000L
+        List<Sample> samples = List.of(
+            new FloatSample(1000L, 10.0),  // first value -> 0
+            new FloatSample(3000L, 20.0),  // changed from 10 -> 1 (2000L is missing, treated as null)
+            new FloatSample(5000L, 20.0)   // same as previous -> 0 (4000L is missing, treated as null)
+        );
+        TimeSeries series = new TimeSeries(samples, labels, 1000L, 5000L, 1000L, null);
+        List<TimeSeries> result = stage.process(List.of(series));
+
+        assertEquals(1, result.size());
+
+        // Output should have samples for ALL timestamps in the range [1000L, 5000L] with step 1000L
+        List<Sample> expectedSamples = List.of(
+            new FloatSample(1000L, 0.0),   // first value, no previous
+            new FloatSample(2000L, 0.0),   // missing sample -> 0
+            new FloatSample(3000L, 1.0),   // changed (10.0 -> 20.0)
+            new FloatSample(4000L, 0.0),   // missing sample -> 0
+            new FloatSample(5000L, 0.0)    // same as previous non-null (20.0)
+        );
+        assertSamplesEqual("Sparse samples with gaps", expectedSamples, result.get(0).getSamples());
+    }
+
+    public void testProcessWithAllMissingSamples() {
+        ChangedStage stage = new ChangedStage();
+        ByteLabels labels = ByteLabels.fromStrings("name", "empty");
+
+        // No input samples, but time range is defined
+        List<Sample> samples = List.of();
+        TimeSeries series = new TimeSeries(samples, labels, 1000L, 3000L, 1000L, null);
+        List<TimeSeries> result = stage.process(List.of(series));
+
+        assertEquals(1, result.size());
+
+        // Output should have samples for ALL timestamps, all with value 0 (missing)
+        List<Sample> expectedSamples = List.of(
+            new FloatSample(1000L, 0.0),   // missing sample -> 0
+            new FloatSample(2000L, 0.0),   // missing sample -> 0
+            new FloatSample(3000L, 0.0)    // missing sample -> 0
+        );
+        assertSamplesEqual("All missing samples", expectedSamples, result.get(0).getSamples());
+    }
+
+    public void testProcessWithMixedNaNAndMissingSamples() {
+        ChangedStage stage = new ChangedStage();
+        ByteLabels labels = ByteLabels.fromStrings("name", "mixed");
+
+        // Mix of NaN values and missing timestamps
+        List<Sample> samples = List.of(
+            new FloatSample(1000L, 10.0),       // first value -> 0
+            new FloatSample(2000L, Double.NaN), // NaN -> 0
+            // 3000L is missing
+            new FloatSample(4000L, 15.0),       // changed from 10.0 -> 1
+            new FloatSample(5000L, Double.NaN)  // NaN -> 0
+            // 6000L is missing
+        );
+        TimeSeries series = new TimeSeries(samples, labels, 1000L, 6000L, 1000L, null);
+        List<TimeSeries> result = stage.process(List.of(series));
+
+        assertEquals(1, result.size());
+        List<Sample> expectedSamples = List.of(
+            new FloatSample(1000L, 0.0),   // first value, no previous
+            new FloatSample(2000L, 0.0),   // NaN value -> 0
+            new FloatSample(3000L, 0.0),   // missing sample -> 0
+            new FloatSample(4000L, 1.0),   // changed (10.0 -> 15.0)
+            new FloatSample(5000L, 0.0),   // NaN value -> 0
+            new FloatSample(6000L, 0.0)    // missing sample -> 0
+        );
+        assertSamplesEqual("Mixed NaN and missing", expectedSamples, result.get(0).getSamples());
+    }
+
     public void testFromArgs() {
         ChangedStage stage = ChangedStage.fromArgs(Map.of());
         assertEquals("changed", stage.getName());
@@ -157,6 +235,56 @@ public class ChangedStageTests extends AbstractWireSerializingTestCase<ChangedSt
     public void testSupportConcurrentSegmentSearch() {
         ChangedStage stage = new ChangedStage();
         assertFalse("Changed stage should not support concurrent segment search", stage.supportConcurrentSegmentSearch());
+    }
+
+    public void testProcessWithDifferentStepSizes() {
+        ChangedStage stage = new ChangedStage();
+        ByteLabels labels = ByteLabels.fromStrings("name", "test");
+
+        // Test with larger step size (2000ms)
+        List<Sample> samples = List.of(
+            new FloatSample(5000L, 100.0), // first value -> 0
+            // 7000L is missing
+            new FloatSample(9000L, 200.0), // changed from 100 -> 1
+            new FloatSample(11000L, 200.0) // same -> 0
+        );
+        TimeSeries series = new TimeSeries(samples, labels, 5000L, 11000L, 2000L, null);
+        List<TimeSeries> result = stage.process(List.of(series));
+
+        assertEquals(1, result.size());
+        List<Sample> expectedSamples = List.of(
+            new FloatSample(5000L, 0.0),   // first value, no previous
+            new FloatSample(7000L, 0.0),   // missing sample -> 0
+            new FloatSample(9000L, 1.0),   // changed (100.0 -> 200.0)
+            new FloatSample(11000L, 0.0)   // same as previous (200.0)
+        );
+        assertSamplesEqual("Different step sizes", expectedSamples, result.get(0).getSamples());
+    }
+
+    public void testProcessWithSparseDataAndZeroValues() {
+        ChangedStage stage = new ChangedStage();
+        ByteLabels labels = ByteLabels.fromStrings("name", "counters");
+
+        // Test transitions between 0 and non-zero values
+        List<Sample> samples = List.of(
+            new FloatSample(1000L, 0.0),   // first value: 0 -> 0
+            // 2000L is missing
+            new FloatSample(3000L, 0.0),   // same as last non-null (0) -> 0
+            new FloatSample(4000L, 1.0),   // changed (0 -> 1) -> 1
+            new FloatSample(5000L, 0.0)    // changed (1 -> 0) -> 1
+        );
+        TimeSeries series = new TimeSeries(samples, labels, 1000L, 5000L, 1000L, null);
+        List<TimeSeries> result = stage.process(List.of(series));
+
+        assertEquals(1, result.size());
+        List<Sample> expectedSamples = List.of(
+            new FloatSample(1000L, 0.0),   // first value (0), no previous
+            new FloatSample(2000L, 0.0),   // missing sample -> 0
+            new FloatSample(3000L, 0.0),   // same as last non-null (0.0)
+            new FloatSample(4000L, 1.0),   // changed (0.0 -> 1.0)
+            new FloatSample(5000L, 1.0)    // changed (1.0 -> 0.0)
+        );
+        assertSamplesEqual("Sparse data with zero values", expectedSamples, result.get(0).getSamples());
     }
 
     @Override
