@@ -7,77 +7,154 @@
  */
 package org.opensearch.tsdb.lang.m3.m3ql.parser.transform;
 
+import com.carrotsearch.randomizedtesting.annotations.ParametersFactory;
 import org.opensearch.test.OpenSearchTestCase;
+import org.opensearch.tsdb.lang.m3.M3TestUtils;
 import org.opensearch.tsdb.lang.m3.m3ql.parser.generated.M3QLParser;
 import org.opensearch.tsdb.lang.m3.m3ql.parser.nodes.FunctionNode;
 import org.opensearch.tsdb.lang.m3.m3ql.parser.nodes.GroupNode;
 import org.opensearch.tsdb.lang.m3.m3ql.parser.nodes.M3ASTNode;
 import org.opensearch.tsdb.lang.m3.m3ql.parser.nodes.PipelineNode;
+import org.opensearch.tsdb.lang.m3.m3ql.plan.M3ASTConverter;
+import org.opensearch.tsdb.lang.m3.m3ql.plan.M3PlannerContext;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * Tests for UnionFunctionTransformation to ensure union function syntax
- * produces the same AST as equivalent pipe syntax.
+ * produces the same plan as equivalent pipe syntax.
  */
 public class UnionFunctionTransformationTests extends OpenSearchTestCase {
 
+    private final String testCaseName;
+    private final List<String> expressions;
+
+    public UnionFunctionTransformationTests(TestCaseData testData) {
+        this.testCaseName = testData.name;
+        this.expressions = testData.expressions;
+    }
+
+    @ParametersFactory
+    public static Iterable<Object[]> parameters() {
+        List<Object[]> testCases = new ArrayList<>();
+
+        // Complex expressions with pipes
+        testCases.add(
+            new Object[] {
+                new TestCaseData(
+                    "Union with complex expressions",
+                    Arrays.asList("fetch name:errors | transformNull 0", "fetch name:requests | sum region")
+                ) }
+        );
+
+        testCases.add(
+            new Object[] {
+                new TestCaseData(
+                    "Complex pipeline union",
+                    Arrays.asList("fetch name:errors | transformNull 0 | sum", "fetch name:requests | avg region")
+                ) }
+        );
+
+        testCases.add(
+            new Object[] {
+                new TestCaseData(
+                    "Union with movingAvg and asPercent",
+                    Arrays.asList(
+                        "fetch name:errors | moving 10min avg | asPercent(fetch name:total | moving 10min avg | timeshift 7d)",
+                        "fetch name:requests | moving 10min avg | asPercent(fetch name:baseline | moving 10min avg | timeshift 7d)",
+                        "fetch name:metric1 | sum | asPercent((fetch name:metric2 | sum | asPercent(fetch name:metric3) name service | avg | (fetch name:metric4 | sum) | avg)) | moving 5m min"
+                    )
+                ) }
+        );
+
+        testCases.add(
+            new Object[] {
+                new TestCaseData(
+                    "Union with nested union calls",
+                    Arrays.asList(
+                        "union (fetch name:a | sum) (union (fetch name:b | avg) (fetch name:c | max))",
+                        "fetch name:x | union (fetch name:y | sum) (fetch name:z | avg) | transformNull 0",
+                        "fetch name:x | exec(union (fetch name:y | sum) (fetch name:z | avg)) | transformNull 0"
+                    )
+                ) }
+        );
+
+        return testCases;
+    }
+
     /**
-     * Test that union function syntax produces the same flattened AST as the equivalent pipeline.
-     * The union function should create a flat pipeline just like the pipe operator with multiple fetches.
+     * Test that union function syntax produces the same plan as equivalent pipe syntaxes.
+     * Tests three equivalent syntaxes:
+     * 1. union (str1) (str2) ...
+     * 2. (str1) | (str2) | (str3) ...
+     * 3. (str1) | exec(str2) | exec(str3) ...
      */
     public void testUnionSyntaxEquivalence() throws Exception {
-        // Test case: union function should be equivalent to multiple fetch pipeline
-        String expr1 = "fetch country:us";
-        String expr2 = "fetch state:xyz";
-        String expr3 = "fetch city:toronto";
+        if (expressions.size() < 2) {
+            fail("Test case must have at least 2 expressions");
+        }
 
-        String unionSyntax = String.format("union (%s) (%s) (%s)", expr1, expr2, expr3);
-        String equivalentPipeSyntax = String.format("%s | %s | %s", expr1, expr2, expr3);
+        // Build union syntax: union (str1) (str2) ...
+        String unionSyntax = buildUnionSyntax(expressions);
 
-        assertASTEqual(unionSyntax, equivalentPipeSyntax, "union() should equal flat pipe syntax");
+        // Build pipe syntax with parentheses: (str1) | (str2) | (str3) ...
+        String pipeSyntaxWithParens = buildPipeSyntaxWithParens(expressions);
+
+        // Build pipe syntax with exec: (str1) | exec(str2) | exec(str3) ...
+        String pipeSyntaxWithExec = buildPipeSyntaxWithExec(expressions);
+
+        // Parse all three, build plans, and compare plans
+        String unionPlanString = planToString(unionSyntax);
+        String pipeParensPlanString = planToString(pipeSyntaxWithParens);
+        String pipeExecPlanString = planToString(pipeSyntaxWithExec);
+
+        assertEquals(testCaseName + ": union() should equal pipe syntax with parentheses", unionPlanString, pipeParensPlanString);
+
+        assertEquals(testCaseName + ": union() should equal pipe syntax with exec", unionPlanString, pipeExecPlanString);
+
+        assertEquals(
+            testCaseName + ": pipe syntax with parentheses should equal pipe syntax with exec",
+            pipeParensPlanString,
+            pipeExecPlanString
+        );
     }
 
     /**
-     * Test union with complex expressions that contain pipe operations within each argument.
+     * Build union syntax: union (str1) (str2) ...
      */
-    public void testUnionWithComplexExpressions() throws Exception {
-        String expr1 = "fetch name:errors | transformNull 0";
-        String expr2 = "fetch name:requests | sum region";
-
-        String unionSyntax = String.format("union (%s) (%s)", expr1, expr2);
-        String equivalentPipeSyntax = String.format("%s | %s", expr1, expr2);
-
-        assertASTEqual(unionSyntax, equivalentPipeSyntax, "union() with complex expressions");
+    private String buildUnionSyntax(List<String> expressions) {
+        return "union " + expressions.stream().map(expr -> "(" + expr + ")").collect(Collectors.joining(" "));
     }
 
     /**
-     * Test simple two-expression union equivalence.
+     * Build pipe syntax with parentheses: (str1) | (str2) | (str3) ...
      */
-    public void testSimpleUnionEquivalence() throws Exception {
-        String expr1 = "fetch name:metric1";
-        String expr2 = "fetch name:metric2";
-
-        String unionSyntax = String.format("union (%s) (%s)", expr1, expr2);
-        String pipeSyntax = String.format("%s | %s", expr1, expr2);
-
-        assertASTEqual(unionSyntax, pipeSyntax, "Simple two-expression union");
+    private String buildPipeSyntaxWithParens(List<String> expressions) {
+        if (expressions.isEmpty()) {
+            return "";
+        }
+        return expressions.stream().map(expr -> "(" + expr + ")").collect(Collectors.joining(" | "));
     }
 
     /**
-     * Test complex pipeline expressions in union.
+     * Build pipe syntax with exec: (str1) | exec(str2) | exec(str3) ...
      */
-    public void testComplexPipelineUnion() throws Exception {
-        String expr1 = "fetch name:errors | transformNull 0 | sum";
-        String expr2 = "fetch name:requests | avg region";
-
-        String unionSyntax = String.format("union (%s) (%s)", expr1, expr2);
-        String pipeSyntax = String.format("%s | %s", expr1, expr2);
-
-        assertASTEqual(unionSyntax, pipeSyntax, "Complex pipeline union");
+    private String buildPipeSyntaxWithExec(List<String> expressions) {
+        if (expressions.isEmpty()) {
+            return "";
+        }
+        String first = "(" + expressions.get(0) + ")";
+        String rest = expressions.subList(1, expressions.size())
+            .stream()
+            .map(expr -> "exec(" + expr + ")")
+            .collect(Collectors.joining(" | "));
+        return rest.isEmpty() ? first : first + " | " + rest;
     }
 
     /**
@@ -110,14 +187,32 @@ public class UnionFunctionTransformationTests extends OpenSearchTestCase {
         assertTrue("Should be able to transform union function", transformation.canTransform(unionFunction));
 
         List<M3ASTNode> result = transformation.transform(unionFunction);
-        assertEquals("Should return 2 function nodes", 2, result.size());
+        assertEquals("Should return 2 GroupNodes", 2, result.size());
 
-        // Verify the results are the fetch functions
-        assertTrue("First result should be FunctionNode", result.get(0) instanceof FunctionNode);
-        assertTrue("Second result should be FunctionNode", result.get(1) instanceof FunctionNode);
+        // Verify the results are GroupNodes (preserving structure to match pipe syntax)
+        assertTrue("First result should be GroupNode", result.get(0) instanceof GroupNode);
+        assertTrue("Second result should be GroupNode", result.get(1) instanceof GroupNode);
 
-        FunctionNode firstFetch = (FunctionNode) result.get(0);
-        FunctionNode secondFetch = (FunctionNode) result.get(1);
+        GroupNode firstGroup = (GroupNode) result.get(0);
+        GroupNode secondGroup = (GroupNode) result.get(1);
+
+        // Verify the GroupNodes contain the expected PipelineNodes
+        assertTrue("First group should have one child", firstGroup.getChildren().size() == 1);
+        assertTrue("Second group should have one child", secondGroup.getChildren().size() == 1);
+        assertTrue("First group child should be PipelineNode", firstGroup.getChildren().get(0) instanceof PipelineNode);
+        assertTrue("Second group child should be PipelineNode", secondGroup.getChildren().get(0) instanceof PipelineNode);
+
+        // Verify the PipelineNodes contain the fetch functions
+        PipelineNode firstPipeline = (PipelineNode) firstGroup.getChildren().get(0);
+        PipelineNode secondPipeline = (PipelineNode) secondGroup.getChildren().get(0);
+
+        assertTrue("First pipeline should have one child", firstPipeline.getChildren().size() == 1);
+        assertTrue("Second pipeline should have one child", secondPipeline.getChildren().size() == 1);
+        assertTrue("First pipeline child should be FunctionNode", firstPipeline.getChildren().get(0) instanceof FunctionNode);
+        assertTrue("Second pipeline child should be FunctionNode", secondPipeline.getChildren().get(0) instanceof FunctionNode);
+
+        FunctionNode firstFetch = (FunctionNode) firstPipeline.getChildren().get(0);
+        FunctionNode secondFetch = (FunctionNode) secondPipeline.getChildren().get(0);
 
         assertEquals("First fetch should be 'fetch'", "fetch", firstFetch.getFunctionName());
         assertEquals("Second fetch should be 'fetch'", "fetch", secondFetch.getFunctionName());
@@ -162,49 +257,18 @@ public class UnionFunctionTransformationTests extends OpenSearchTestCase {
     }
 
     /**
-     * Helper method to compare ASTs from two different query syntaxes.
+     * Convert query to plan string representation for comparison.
      */
-    private void assertASTEqual(String query1, String query2, String testCase) throws Exception {
-        // Parse both queries with AST processing
-        M3ASTNode ast1 = M3QLParser.parse(query1, true);
-        M3ASTNode ast2 = M3QLParser.parse(query2, true);
-
-        // Convert both ASTs to string representation for comparison
-        String ast1String = astToString(ast1);
-        String ast2String = astToString(ast2);
-
-        assertEquals(testCase + ": ASTs should be identical", ast2String, ast1String);
-    }
-
-    /**
-     * Convert AST to string representation for comparison.
-     */
-    private String astToString(M3ASTNode node) {
-        try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
+    private String planToString(String query) {
+        try (ByteArrayOutputStream baos = new ByteArrayOutputStream(); M3PlannerContext context = M3PlannerContext.create()) {
             PrintStream ps = new PrintStream(baos, true, StandardCharsets.UTF_8);
-            printAST(node, 0, ps);
+
+            M3ASTConverter converter = new M3ASTConverter(context);
+            M3TestUtils.printPlan(converter.buildPlan(M3QLParser.parse(query, true)), 0, ps);
             return baos.toString(StandardCharsets.UTF_8);
         } catch (Exception e) {
-            fail("Failed to convert AST to string: " + e.getMessage());
+            fail("Failed to build plan for query: " + query + " with error: " + e.getMessage());
             return null;
-        }
-    }
-
-    /**
-     * Print AST structure (similar to M3TestUtils.printAST).
-     */
-    private void printAST(M3ASTNode node, int depth, PrintStream out) {
-        // Print indentation
-        for (int i = 0; i < depth; i++) {
-            out.print("  ");
-        }
-
-        // Print node type and name
-        out.println(node.getExplainName());
-
-        // Print children recursively
-        for (M3ASTNode child : node.getChildren()) {
-            printAST(child, depth + 1, out);
         }
     }
 
@@ -226,5 +290,18 @@ public class UnionFunctionTransformationTests extends OpenSearchTestCase {
         FunctionNode fetch = new FunctionNode();
         fetch.setFunctionName("fetch");
         return fetch;
+    }
+
+    /**
+     * Test case data holder for parameterized tests.
+     */
+    public static class TestCaseData {
+        public final String name;
+        public final List<String> expressions;
+
+        public TestCaseData(String name, List<String> expressions) {
+            this.name = name;
+            this.expressions = expressions;
+        }
     }
 }
