@@ -69,6 +69,7 @@ public class TSDBEngineSingleNodeTests extends OpenSearchSingleNodeTestCase {
                 .setSettings(
                     Settings.builder()
                         .put("index.tsdb_engine.enabled", true)
+                        .put("index.tsdb_engine.lang.m3.default_step_size", "10s")
                         .put("index.queries.cache.enabled", false)
                         .put("index.requests.cache.enable", false)
                         .build()
@@ -415,6 +416,7 @@ public class TSDBEngineSingleNodeTests extends OpenSearchSingleNodeTestCase {
             .setSettings(
                 Settings.builder()
                     .put("index.tsdb_engine.enabled", true)
+                    .put("index.tsdb_engine.lang.m3.default_step_size", "10s")
                     .put("index.queries.cache.enabled", false)
                     .put("index.requests.cache.enable", false)
                     .put("index.tsdb_engine.commit_interval", "5m") // Commits every 5m (throttled)
