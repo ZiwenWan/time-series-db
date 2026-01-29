@@ -59,6 +59,7 @@ public class Constants {
             "jainCP",
             "logarithm",
             "mapKey",
+            "mockFetch",
             "mockFetchLine",
             "mockFetchLinear",
             "mockFetchPeriodic",

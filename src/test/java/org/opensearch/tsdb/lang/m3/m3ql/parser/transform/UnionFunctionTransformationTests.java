@@ -26,26 +26,58 @@ import java.util.List;
 public class UnionFunctionTransformationTests extends OpenSearchTestCase {
 
     /**
-     * Test that union function syntax produces identical AST to pipe syntax.
+     * Test that union function syntax produces the same flattened AST as the equivalent pipeline.
+     * The union function should create a flat pipeline just like the pipe operator with multiple fetches.
      */
-    public void testUnionFunctionEquivalentToPipeSyntax() throws Exception {
-        // Test case 1: Two fetch expressions
-        String unionSyntax1 = "union (fetch name:actions1) (fetch name:actions2)";
-        String pipeSyntax1 = "fetch name:actions1 | fetch name:actions2";
+    public void testUnionSyntaxEquivalence() throws Exception {
+        // Test case: union function should be equivalent to multiple fetch pipeline
+        String expr1 = "fetch country:us";
+        String expr2 = "fetch state:xyz";
+        String expr3 = "fetch city:toronto";
 
-        assertASTEqual(unionSyntax1, pipeSyntax1, "Two fetch union");
+        String unionSyntax = String.format("union (%s) (%s) (%s)", expr1, expr2, expr3);
+        String equivalentPipeSyntax = String.format("%s | %s | %s", expr1, expr2, expr3);
 
-        // Test case 2: Three fetch expressions
-        String unionSyntax2 = "union (fetch name:metric1) (fetch name:metric2) (fetch name:metric3)";
-        String pipeSyntax2 = "fetch name:metric1 | fetch name:metric2 | fetch name:metric3";
+        assertASTEqual(unionSyntax, equivalentPipeSyntax, "union() should equal flat pipe syntax");
+    }
 
-        assertASTEqual(unionSyntax2, pipeSyntax2, "Three fetch union");
+    /**
+     * Test union with complex expressions that contain pipe operations within each argument.
+     */
+    public void testUnionWithComplexExpressions() throws Exception {
+        String expr1 = "fetch name:errors | transformNull 0";
+        String expr2 = "fetch name:requests | sum region";
 
-        // Test case 3: Complex pipeline expressions
-        String unionSyntax3 = "union (fetch name:a | sum) (fetch name:b | avg)";
-        String pipeSyntax3 = "fetch name:a | sum | fetch name:b | avg";
+        String unionSyntax = String.format("union (%s) (%s)", expr1, expr2);
+        String equivalentPipeSyntax = String.format("%s | %s", expr1, expr2);
 
-        assertASTEqual(unionSyntax3, pipeSyntax3, "Complex pipeline union");
+        assertASTEqual(unionSyntax, equivalentPipeSyntax, "union() with complex expressions");
+    }
+
+    /**
+     * Test simple two-expression union equivalence.
+     */
+    public void testSimpleUnionEquivalence() throws Exception {
+        String expr1 = "fetch name:metric1";
+        String expr2 = "fetch name:metric2";
+
+        String unionSyntax = String.format("union (%s) (%s)", expr1, expr2);
+        String pipeSyntax = String.format("%s | %s", expr1, expr2);
+
+        assertASTEqual(unionSyntax, pipeSyntax, "Simple two-expression union");
+    }
+
+    /**
+     * Test complex pipeline expressions in union.
+     */
+    public void testComplexPipelineUnion() throws Exception {
+        String expr1 = "fetch name:errors | transformNull 0 | sum";
+        String expr2 = "fetch name:requests | avg region";
+
+        String unionSyntax = String.format("union (%s) (%s)", expr1, expr2);
+        String pipeSyntax = String.format("%s | %s", expr1, expr2);
+
+        assertASTEqual(unionSyntax, pipeSyntax, "Complex pipeline union");
     }
 
     /**
@@ -132,16 +164,16 @@ public class UnionFunctionTransformationTests extends OpenSearchTestCase {
     /**
      * Helper method to compare ASTs from two different query syntaxes.
      */
-    private void assertASTEqual(String unionQuery, String pipeQuery, String testCase) throws Exception {
+    private void assertASTEqual(String query1, String query2, String testCase) throws Exception {
         // Parse both queries with AST processing
-        M3ASTNode unionAST = M3QLParser.parse(unionQuery, true);
-        M3ASTNode pipeAST = M3QLParser.parse(pipeQuery, true);
+        M3ASTNode ast1 = M3QLParser.parse(query1, true);
+        M3ASTNode ast2 = M3QLParser.parse(query2, true);
 
         // Convert both ASTs to string representation for comparison
-        String unionASTString = astToString(unionAST);
-        String pipeASTString = astToString(pipeAST);
+        String ast1String = astToString(ast1);
+        String ast2String = astToString(ast2);
 
-        assertEquals(testCase + ": ASTs should be identical", pipeASTString, unionASTString);
+        assertEquals(testCase + ": ASTs should be identical", ast2String, ast1String);
     }
 
     /**
