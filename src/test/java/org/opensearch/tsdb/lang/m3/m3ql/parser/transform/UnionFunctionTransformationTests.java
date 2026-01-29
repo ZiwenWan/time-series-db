@@ -234,7 +234,7 @@ public class UnionFunctionTransformationTests extends OpenSearchTestCase {
     /**
      * Test validation of minimum arguments.
      */
-    public void testUnionFunctionValidation() {
+    public void testUnionFunctionValidationMinimumArguments() {
         UnionFunctionTransformation transformation = new UnionFunctionTransformation();
 
         // Test with only 1 argument (should fail)
@@ -250,9 +250,53 @@ public class UnionFunctionTransformationTests extends OpenSearchTestCase {
             () -> { transformation.transform(unionFunction); }
         );
 
-        assertTrue(
-            "Error message should mention minimum arguments",
-            exception.getMessage().contains("union function requires at least 2 arguments")
+        assertEquals("union function requires at least 2 arguments, got 1", exception.getMessage());
+    }
+
+    /**
+     * Test validation that all arguments must be GroupNodes (parenthesized expressions).
+     */
+    public void testUnionFunctionValidationNonGroupNodeArgument() {
+        UnionFunctionTransformation transformation = new UnionFunctionTransformation();
+
+        // Test with a FunctionNode as first argument (should fail)
+        FunctionNode unionFunction = new FunctionNode();
+        unionFunction.setFunctionName("union");
+        FunctionNode fetchFunction = createFetchFunction("test");
+        unionFunction.addChildNode(fetchFunction);
+        GroupNode groupNode = new GroupNode();
+        unionFunction.addChildNode(groupNode);
+
+        assertTrue("Should be able to transform union function", transformation.canTransform(unionFunction));
+
+        IllegalArgumentException exception = expectThrows(
+            IllegalArgumentException.class,
+            () -> { transformation.transform(unionFunction); }
+        );
+
+        assertEquals(
+            "union function expects argument 1 of type Pipeline (parenthesized expression), received 'FunctionNode(fetch)'",
+            exception.getMessage()
+        );
+
+        // Test with a FunctionNode as second argument (should fail)
+        FunctionNode unionFunction2 = new FunctionNode();
+        unionFunction2.setFunctionName("union");
+        GroupNode groupNode1 = new GroupNode();
+        unionFunction2.addChildNode(groupNode1);
+        FunctionNode sumFunction = createFunctionNode("sum");
+        unionFunction2.addChildNode(sumFunction);
+
+        assertTrue("Should be able to transform union function", transformation.canTransform(unionFunction2));
+
+        IllegalArgumentException exception2 = expectThrows(
+            IllegalArgumentException.class,
+            () -> { transformation.transform(unionFunction2); }
+        );
+
+        assertEquals(
+            "union function expects argument 2 of type Pipeline (parenthesized expression), received 'FunctionNode(sum)'",
+            exception2.getMessage()
         );
     }
 

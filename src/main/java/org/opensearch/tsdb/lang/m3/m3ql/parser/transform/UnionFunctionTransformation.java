@@ -13,6 +13,7 @@ import org.opensearch.tsdb.lang.m3.m3ql.parser.nodes.M3ASTNode;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * AST transformation that converts union function calls into pipeline structures.
@@ -77,16 +78,25 @@ public class UnionFunctionTransformation implements ASTTransformation {
         // This ensures: union (expr1) (expr2) produces the same AST structure as (expr1) | (expr2)
         List<M3ASTNode> resultNodes = new ArrayList<>();
 
-        for (M3ASTNode child : children) {
+        for (int i = 0; i < children.size(); i++) {
+            M3ASTNode child = children.get(i);
             if (child instanceof GroupNode) {
                 // Preserve the GroupNode structure to match pipe syntax behavior
                 resultNodes.add(child);
             } else {
-                // Direct expression (shouldn't happen with proper parentheses, but handle gracefully)
-                // Wrap it in a GroupNode to maintain consistency
-                GroupNode wrapperGroup = new GroupNode();
-                wrapperGroup.addChildNode(child);
-                resultNodes.add(wrapperGroup);
+                // Union function requires all arguments to be parenthesized expressions (GroupNodes)
+                String childType = child.getClass().getSimpleName();
+                if (child instanceof FunctionNode functionChild) {
+                    childType = "FunctionNode(" + functionChild.getFunctionName() + ")";
+                }
+                throw new IllegalArgumentException(
+                    String.format(
+                        Locale.ROOT,
+                        "union function expects argument %d of type Pipeline (parenthesized expression), received '%s'",
+                        i + 1,
+                        childType
+                    )
+                );
             }
         }
 
