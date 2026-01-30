@@ -146,6 +146,10 @@ public final class TSDBMetricsConstants {
     /** Histogram: Reduce phase latency - slowest shard (user-perceived latency) */
     public static final String ACTION_REST_QUERIES_REDUCE_PHASE_LATENCY_MAX = "tsdb.action.rest.queries.reduce_phase.latency.max";
 
+    /** Histogram: Post collection phase latency - slowest shard (user-perceived latency) */
+    public static final String ACTION_REST_QUERIES_POST_COLLECTION_PHASE_LATENCY_MAX =
+        "tsdb.action.rest.queries.post_collection_phase.latency.max";
+
     /** Histogram: Collect phase CPU time summed across all shards */
     public static final String ACTION_REST_QUERIES_COLLECT_PHASE_CPU_TIME_MS = "tsdb.action.rest.queries.collect_phase.cpu_time_ms";
 
@@ -290,6 +294,8 @@ public final class TSDBMetricsConstants {
         "Collect phase latency - slowest shard (user-perceived query latency)";
     public static final String ACTION_REST_QUERIES_REDUCE_PHASE_LATENCY_MAX_DESC =
         "Reduce phase latency - slowest shard (user-perceived query latency)";
+    public static final String ACTION_REST_QUERIES_POST_COLLECTION_PHASE_LATENCY_MAX_DESC =
+        "Post collection phase latency - slowest shard (user-perceived query latency)";
     public static final String ACTION_REST_QUERIES_COLLECT_PHASE_CPU_TIME_MS_DESC = "Collect phase CPU time summed across all shards";
     public static final String ACTION_REST_QUERIES_REDUCE_PHASE_CPU_TIME_MS_DESC = "Reduce phase CPU time summed across all shards";
     public static final String ACTION_REST_QUERIES_SHARD_LATENCY_MAX_DESC =

@@ -261,7 +261,21 @@ public class RestM3QLAction extends BaseTSDBAction {
                         tags.put("reached_step", "search");
                         client.search(
                             searchRequest,
-                            new PromMatrixResponseListener(channel, finalAggName, params.profile, params.includeMetadata)
+                            new PromMatrixResponseListener(
+                                channel,
+                                finalAggName,
+                                params.profile,
+                                params.includeMetadata,
+                                new PromMatrixResponseListener.QueryMetrics(
+                                    METRICS.executionLatency,
+                                    METRICS.collectPhaseLatencyMax,
+                                    METRICS.reducePhaseLatencyMax,
+                                    METRICS.postCollectionPhaseLatencyMax,
+                                    METRICS.collectPhaseCpuTimeMs,
+                                    METRICS.reducePhaseCpuTimeMs,
+                                    METRICS.shardLatencyMax
+                                )
+                            )
                         );
 
                     } catch (UnsupportedOperationException e) {
@@ -728,6 +742,7 @@ public class RestM3QLAction extends BaseTSDBAction {
         Histogram executionLatency;
         Histogram collectPhaseLatencyMax;
         Histogram reducePhaseLatencyMax;
+        Histogram postCollectionPhaseLatencyMax;
         Histogram collectPhaseCpuTimeMs;
         Histogram reducePhaseCpuTimeMs;
         Histogram shardLatencyMax;
@@ -753,6 +768,11 @@ public class RestM3QLAction extends BaseTSDBAction {
             reducePhaseLatencyMax = registry.createHistogram(
                 TSDBMetricsConstants.ACTION_REST_QUERIES_REDUCE_PHASE_LATENCY_MAX,
                 TSDBMetricsConstants.ACTION_REST_QUERIES_REDUCE_PHASE_LATENCY_MAX_DESC,
+                TSDBMetricsConstants.UNIT_MILLISECONDS
+            );
+            postCollectionPhaseLatencyMax = registry.createHistogram(
+                TSDBMetricsConstants.ACTION_REST_QUERIES_POST_COLLECTION_PHASE_LATENCY_MAX,
+                TSDBMetricsConstants.ACTION_REST_QUERIES_POST_COLLECTION_PHASE_LATENCY_MAX_DESC,
                 TSDBMetricsConstants.UNIT_MILLISECONDS
             );
             collectPhaseCpuTimeMs = registry.createHistogram(
@@ -783,6 +803,7 @@ public class RestM3QLAction extends BaseTSDBAction {
             executionLatency = null;
             collectPhaseLatencyMax = null;
             reducePhaseLatencyMax = null;
+            postCollectionPhaseLatencyMax = null;
             collectPhaseCpuTimeMs = null;
             reducePhaseCpuTimeMs = null;
             shardLatencyMax = null;
