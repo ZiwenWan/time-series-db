@@ -512,28 +512,6 @@ public class TSDBPlugin extends Plugin implements SearchPlugin, EnginePlugin, Ac
     );
 
     /**
-     * Setting for the circuit breaker warning threshold in aggregations.
-     * When an aggregation's circuit breaker allocation exceeds this threshold, a WARN log is emitted
-     * to help detect high cardinality queries or potential memory leaks early.
-     *
-     * <p>Default is 100 MB which is appropriate for most TSDB workloads:
-     * - Typical queries use &lt; 10 MB
-     * - High cardinality queries may use 10-50 MB
-     * - &gt; 100 MB indicates potential issues (excessive cardinality, memory leak, etc.)
-     *
-     * <p>This can be adjusted based on deployment size and use cases. For example:
-     * - Small deployments: 50 MB
-     * - Large deployments with high cardinality: 200 MB or higher
-     */
-    public static final Setting<Long> TSDB_ENGINE_AGGREGATION_CIRCUIT_BREAKER_WARN_THRESHOLD = Setting.longSetting(
-        "tsdb_engine.aggregation.circuit_breaker.warn_threshold",
-        100 * 1024 * 1024,  // default: 100 MB
-        1024 * 1024,        // minimum: 1 MB
-        Setting.Property.NodeScope,
-        Setting.Property.Dynamic
-    );
-
-    /**
      * Setting for the default step size (query resolution) for M3QL queries.
      * This defines the default time interval between data points in query results.
      * Can be overridden by the 'step' parameter in individual M3QL queries.
@@ -661,7 +639,6 @@ public class TSDBPlugin extends Plugin implements SearchPlugin, EnginePlugin, Ac
             TSDB_ENGINE_WILDCARD_QUERY_CACHE_EXPIRE_AFTER,
             TSDB_ENGINE_FORCE_NO_PUSHDOWN,
             TSDB_ENGINE_ENABLE_INTERNAL_AGG_CHUNK_COMPRESSION,
-            TSDB_ENGINE_AGGREGATION_CIRCUIT_BREAKER_WARN_THRESHOLD,
             TSDB_ENGINE_DEFAULT_STEP,
             TSDB_ENGINE_REMOTE_INDEX_SETTINGS_CACHE_TTL,
             TSDB_ENGINE_REMOTE_INDEX_SETTINGS_CACHE_MAX_SIZE
@@ -716,9 +693,9 @@ public class TSDBPlugin extends Plugin implements SearchPlugin, EnginePlugin, Ac
     @Override
     public Optional<EngineFactory> getEngineFactory(IndexSettings indexSettings) {
         if (TSDB_ENGINE_ENABLED.get(indexSettings.getSettings())) {
-            // Validate that required settings are explicitly configured for TSDB indexes
-            // TODO: uncomment this after step size index settings is deployed to all the clusters
-            // validateRequiredSettings(indexSettings);
+            // Validate that required settings are explicitly configured for M3 indexes
+            // TODO : tie the whole validation logic to engine variant and only run it for M3 engine
+            validateRequiredSettingsForM3Index(indexSettings);
             return Optional.of(new TSDBEngineFactory());
         }
         return Optional.empty();
@@ -731,11 +708,12 @@ public class TSDBPlugin extends Plugin implements SearchPlugin, EnginePlugin, Ac
      * @param indexSettings the index settings to validate
      * @throws IllegalArgumentException if a required setting is not explicitly configured
      */
-    private void validateRequiredSettings(IndexSettings indexSettings) {
+    private void validateRequiredSettingsForM3Index(IndexSettings indexSettings) {
         Settings settings = indexSettings.getSettings();
 
         // Check if the step size setting is explicitly configured (not using default)
-        if (!settings.hasValue(TSDB_ENGINE_DEFAULT_STEP.getKey())) {
+        // We check the raw settings object, which returns null if the setting wasn't explicitly provided
+        if (settings.get(TSDB_ENGINE_DEFAULT_STEP.getKey()) == null) {
             throw new IllegalArgumentException(
                 String.format(
                     java.util.Locale.ROOT,
