@@ -74,7 +74,11 @@ public class DivideScalarPlanNode extends M3PlanNode {
         if (!(childNodes.getFirst() instanceof ValueNode valueNode)) {
             throw new IllegalArgumentException("Argument to divideScalar function should be a value node");
         }
-        double value = Double.parseDouble(valueNode.getValue());
-        return new DivideScalarPlanNode(M3PlannerContext.generateId(), value);
+        try {
+            double value = Double.parseDouble(valueNode.getValue());
+            return new DivideScalarPlanNode(M3PlannerContext.generateId(), value);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Invalid numeric value for divideScalar function: " + valueNode.getValue(), e);
+        }
     }
 }

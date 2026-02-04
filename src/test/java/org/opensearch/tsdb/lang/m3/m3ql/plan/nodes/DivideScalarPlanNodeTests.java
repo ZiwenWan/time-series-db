@@ -123,7 +123,7 @@ public class DivideScalarPlanNodeTests extends BasePlanNodeTests {
         functionNode.setFunctionName("divideScalar");
         functionNode.addChildNode(new ValueNode("not_a_number"));
 
-        expectThrows(NumberFormatException.class, () -> DivideScalarPlanNode.of(functionNode));
+        expectThrows(IllegalArgumentException.class, () -> DivideScalarPlanNode.of(functionNode));
     }
 
     private static class TestMockVisitor extends M3PlanVisitor<String> {
