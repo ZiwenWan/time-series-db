@@ -87,7 +87,6 @@ public class Constants {
             "timestamp",
             "toHistogram",
             "toHistogramLinearBuckets",
-            "union",
             "where"
         );
 
