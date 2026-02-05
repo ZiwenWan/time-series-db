@@ -196,7 +196,8 @@ public class SortComparatorUtilTests extends OpenSearchTestCase {
         for (int i = 0; i < values.length; i++) {
             String value = values[i].trim();
             if (value.equals("null")) {
-                samples.add(null);
+                // Skip null values entirely (sparse representation)
+                continue;
             } else if (value.equals("NaN")) {
                 samples.add(new FloatSample(1000L + i * 1000L, Double.NaN));
             } else {
@@ -215,13 +216,9 @@ public class SortComparatorUtilTests extends OpenSearchTestCase {
         Labels labels = ByteLabels.fromMap(Map.of("label", label));
         long endTime = 1000L;
 
-        // Find the last non-null sample to get endTime
-        for (int i = samples.size() - 1; i >= 0; i--) {
-            Sample sample = samples.get(i);
-            if (sample != null) {
-                endTime = sample.getTimestamp();
-                break;
-            }
+        // Find the last sample to get endTime (no null samples anymore)
+        if (!samples.isEmpty()) {
+            endTime = samples.get(samples.size() - 1).getTimestamp();
         }
 
         return new TimeSeries(samples, labels, 1000L, endTime, 1000L, label);
