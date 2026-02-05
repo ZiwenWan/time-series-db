@@ -13,6 +13,7 @@ import org.opensearch.core.xcontent.ToXContent;
 import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.tsdb.core.model.FloatSample;
 import org.opensearch.tsdb.core.model.Sample;
+import org.opensearch.tsdb.core.model.SampleList;
 import org.opensearch.tsdb.query.aggregator.TimeSeries;
 import org.opensearch.tsdb.query.stage.PipelineStageAnnotation;
 import org.opensearch.tsdb.query.stage.UnaryPipelineStage;
@@ -74,7 +75,7 @@ public class ChangedStage implements UnaryPipelineStage {
         long minTimestamp = series.getMinTimestamp();
         long maxTimestamp = series.getMaxTimestamp();
         long stepSize = series.getStep();
-        List<Sample> samples = series.getSamples();
+        SampleList samples = series.getSamples();
 
         // Calculate total number of expected timestamps
         int numSteps = (int) ((maxTimestamp - minTimestamp) / stepSize) + 1;
@@ -91,7 +92,7 @@ public class ChangedStage implements UnaryPipelineStage {
             // Check if we have a sample at this timestamp
             Double currentValue = null;
             if (sampleIdx < samples.size()) {
-                Sample sample = samples.get(sampleIdx);
+                Sample sample = samples.getSample(sampleIdx);
                 if (sample != null && sample.getTimestamp() == timestamp) {
                     double value = sample.getValue();
                     currentValue = Double.isNaN(value) ? null : value;

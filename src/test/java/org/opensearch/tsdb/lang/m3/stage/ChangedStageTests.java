@@ -56,7 +56,7 @@ public class ChangedStageTests extends AbstractWireSerializingTestCase<ChangedSt
             new FloatSample(4000L, 0.0),   // same as previous (20.0)
             new FloatSample(5000L, 1.0)    // changed (20.0 -> 15.0)
         );
-        assertSamplesEqual("Basic changed", expectedSamples, result.get(0).getSamples());
+        assertSamplesEqual("Basic changed", expectedSamples, result.get(0).getSamples().toList());
     }
 
     public void testProcessWithNaNValues() {
@@ -80,7 +80,7 @@ public class ChangedStageTests extends AbstractWireSerializingTestCase<ChangedSt
             new FloatSample(4000L, 0.0),   // same as last non-NaN (20.0)
             new FloatSample(5000L, 1.0)    // changed from last non-NaN (20.0 -> 30.0)
         );
-        assertSamplesEqual("Changed with NaN values", expectedSamples, result.get(0).getSamples());
+        assertSamplesEqual("Changed with NaN values", expectedSamples, result.get(0).getSamples().toList());
     }
 
     public void testProcessWithAllNaNValues() {
@@ -96,7 +96,7 @@ public class ChangedStageTests extends AbstractWireSerializingTestCase<ChangedSt
 
         assertEquals(1, result.size());
         List<Sample> expectedSamples = List.of(new FloatSample(1000L, 0.0), new FloatSample(2000L, 0.0), new FloatSample(3000L, 0.0));
-        assertSamplesEqual("All NaN values", expectedSamples, result.get(0).getSamples());
+        assertSamplesEqual("All NaN values", expectedSamples, result.get(0).getSamples().toList());
     }
 
     public void testProcessWithSingleSample() {
@@ -110,7 +110,7 @@ public class ChangedStageTests extends AbstractWireSerializingTestCase<ChangedSt
         List<Sample> expectedSamples = List.of(
             new FloatSample(1000L, 0.0) // single sample, no previous value
         );
-        assertSamplesEqual("Single sample", expectedSamples, result.get(0).getSamples());
+        assertSamplesEqual("Single sample", expectedSamples, result.get(0).getSamples().toList());
     }
 
     public void testProcessWithEmptySamples() {
@@ -126,7 +126,7 @@ public class ChangedStageTests extends AbstractWireSerializingTestCase<ChangedSt
         List<Sample> expectedSamples = List.of(
             new FloatSample(1000L, 0.0) // missing sample at timestamp 1000L -> 0
         );
-        assertSamplesEqual("Empty input samples", expectedSamples, result.get(0).getSamples());
+        assertSamplesEqual("Empty input samples", expectedSamples, result.get(0).getSamples().toList());
     }
 
     public void testProcessTransitionFromNaN() {
@@ -150,7 +150,7 @@ public class ChangedStageTests extends AbstractWireSerializingTestCase<ChangedSt
             new FloatSample(4000L, 0.0), // same as previous
             new FloatSample(5000L, 1.0)  // changed
         );
-        assertSamplesEqual("Transition from NaN", expectedSamples, result.get(0).getSamples());
+        assertSamplesEqual("Transition from NaN", expectedSamples, result.get(0).getSamples().toList());
     }
 
     public void testProcessWithMissingSamples() {
@@ -176,7 +176,7 @@ public class ChangedStageTests extends AbstractWireSerializingTestCase<ChangedSt
             new FloatSample(4000L, 0.0),   // missing sample -> 0
             new FloatSample(5000L, 0.0)    // same as previous non-null (20.0)
         );
-        assertSamplesEqual("Sparse samples with gaps", expectedSamples, result.get(0).getSamples());
+        assertSamplesEqual("Sparse samples with gaps", expectedSamples, result.get(0).getSamples().toList());
     }
 
     public void testProcessWithAllMissingSamples() {
@@ -196,7 +196,7 @@ public class ChangedStageTests extends AbstractWireSerializingTestCase<ChangedSt
             new FloatSample(2000L, 0.0),   // missing sample -> 0
             new FloatSample(3000L, 0.0)    // missing sample -> 0
         );
-        assertSamplesEqual("All missing samples", expectedSamples, result.get(0).getSamples());
+        assertSamplesEqual("All missing samples", expectedSamples, result.get(0).getSamples().toList());
     }
 
     public void testProcessWithMixedNaNAndMissingSamples() {
@@ -224,7 +224,7 @@ public class ChangedStageTests extends AbstractWireSerializingTestCase<ChangedSt
             new FloatSample(5000L, 0.0),   // NaN value -> 0
             new FloatSample(6000L, 0.0)    // missing sample -> 0
         );
-        assertSamplesEqual("Mixed NaN and missing", expectedSamples, result.get(0).getSamples());
+        assertSamplesEqual("Mixed NaN and missing", expectedSamples, result.get(0).getSamples().toList());
     }
 
     public void testFromArgs() {
@@ -258,7 +258,7 @@ public class ChangedStageTests extends AbstractWireSerializingTestCase<ChangedSt
             new FloatSample(9000L, 1.0),   // changed (100.0 -> 200.0)
             new FloatSample(11000L, 0.0)   // same as previous (200.0)
         );
-        assertSamplesEqual("Different step sizes", expectedSamples, result.get(0).getSamples());
+        assertSamplesEqual("Different step sizes", expectedSamples, result.get(0).getSamples().toList());
     }
 
     public void testProcessWithSparseDataAndZeroValues() {
@@ -284,7 +284,7 @@ public class ChangedStageTests extends AbstractWireSerializingTestCase<ChangedSt
             new FloatSample(4000L, 1.0),   // changed (0.0 -> 1.0)
             new FloatSample(5000L, 1.0)    // changed (1.0 -> 0.0)
         );
-        assertSamplesEqual("Sparse data with zero values", expectedSamples, result.get(0).getSamples());
+        assertSamplesEqual("Sparse data with zero values", expectedSamples, result.get(0).getSamples().toList());
     }
 
     @Override
