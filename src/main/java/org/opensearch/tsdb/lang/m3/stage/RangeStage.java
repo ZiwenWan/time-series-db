@@ -11,7 +11,6 @@ import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.tsdb.core.model.FloatSample;
 import org.opensearch.tsdb.core.model.MinMaxSample;
 import org.opensearch.tsdb.core.model.Sample;
-import org.opensearch.tsdb.core.model.SampleList;
 import org.opensearch.tsdb.query.aggregator.TimeSeries;
 import org.opensearch.tsdb.query.stage.PipelineStageAnnotation;
 
@@ -102,8 +101,7 @@ public class RangeStage extends AbstractGroupingSampleStage {
 
     @Override
     protected TimeSeries materializeSamples(TimeSeries timeSeries) {
-        SampleList sampleList = timeSeries.getSamples();
-        List<Sample> samples = sampleList.toList();
+        List<Sample> samples = timeSeries.getSamples();
         for (int i = 0; i < samples.size(); i++) {
             Sample sample = samples.get(i);
             // RangeStage always works with MinMaxSample, so this should always be true
@@ -112,14 +110,7 @@ public class RangeStage extends AbstractGroupingSampleStage {
             double range = minMaxSample.getRange();
             samples.set(i, new FloatSample(sample.getTimestamp(), range));
         }
-        return new TimeSeries(
-            samples,
-            timeSeries.getLabels(),
-            timeSeries.getMinTimestamp(),
-            timeSeries.getMaxTimestamp(),
-            timeSeries.getStep(),
-            timeSeries.getAlias()
-        );
+        return timeSeries;
     }
 
     @Override
