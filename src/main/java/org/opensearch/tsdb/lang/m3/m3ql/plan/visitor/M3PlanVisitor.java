@@ -12,6 +12,7 @@ import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.AggregationPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.AliasByTagsPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.AliasPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.BinaryPlanNode;
+import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.ChangedPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.DerivativePlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.DivideScalarPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.ExcludeByTagPlanNode;
@@ -41,6 +42,7 @@ import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.SustainPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.SummarizePlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.TagSubPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.TimeshiftPlanNode;
+import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.TopKPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.TransformNullPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.UnionPlanNode;
 
@@ -106,6 +108,15 @@ public abstract class M3PlanVisitor<T> {
      * @return the result of processing the BinaryPlanNode
      */
     public T visit(BinaryPlanNode planNode) {
+        return process(planNode);
+    }
+
+    /**
+     * Visit method for ChangedPlanNode.
+     * @param planNode the ChangedPlanNode to visit
+     * @return the result of processing the ChangedPlanNode
+     */
+    public T visit(ChangedPlanNode planNode) {
         return process(planNode);
     }
 
@@ -321,6 +332,15 @@ public abstract class M3PlanVisitor<T> {
      * @return the result of processing the SqrtPlanNode
      */
     public T visit(SqrtPlanNode planNode) {
+        return process(planNode);
+    }
+
+    /**
+     * Visit method for TopKPlanNode.
+     * @param planNode the TopKPlanNode to visit
+     * @return the result of processing the TopKPlanNode
+     */
+    public T visit(TopKPlanNode planNode) {
         return process(planNode);
     }
 

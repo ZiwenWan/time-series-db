@@ -14,6 +14,7 @@ import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.AbsPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.AggregationPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.AliasByTagsPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.AliasPlanNode;
+import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.ChangedPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.ExcludeByTagPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.DerivativePlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.DivideScalarPlanNode;
@@ -43,6 +44,7 @@ import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.SortPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.SustainPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.SummarizePlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.TimeshiftPlanNode;
+import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.TopKPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.TransformNullPlanNode;
 
 /**
@@ -72,6 +74,8 @@ public class M3PlanNodeFactory {
                 return AliasPlanNode.of(functionNode);
             case Constants.Functions.ALIAS_BY_TAGS:
                 return AliasByTagsPlanNode.of(functionNode);
+            case Constants.Functions.CHANGED:
+                return ChangedPlanNode.of(functionNode);
             case Constants.Functions.DERIVATIVE:
                 return DerivativePlanNode.of(functionNode);
             case Constants.Functions.EXCLUDE_BY_TAG:
@@ -114,6 +118,8 @@ public class M3PlanNodeFactory {
             case Constants.Functions.SORT:
             case Constants.Functions.SORT_SERIES:
                 return SortPlanNode.of(functionNode);
+            case Constants.Functions.TOP_K:
+                return TopKPlanNode.of(functionNode);
             case Constants.Functions.SUMMARIZE:
                 return SummarizePlanNode.of(functionNode);
             case Constants.Functions.SCALE:

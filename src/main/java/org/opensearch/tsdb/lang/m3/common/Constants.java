@@ -51,7 +51,6 @@ public class Constants {
             "asMultiBurnRate",
             "burnRate",
             "burnRateMultiplier",
-            "changed",
             "constantLine",
             "divideWhen",
             "histogramCDF",
@@ -65,8 +64,6 @@ public class Constants {
             "nonNegativeDerivative",
             "nPercentile",
             "promHistogramPercentile",
-            "range",
-            "rangeOfSeries",
             "removeAbovePercentile",
             "removeBelowPercentile",
             "setDiff",
@@ -77,7 +74,6 @@ public class Constants {
             "switch",
             "tagCompare",
             "tail",
-            "topK",
             "timestamp",
             "toHistogram",
             "toHistogramLinearBuckets",
@@ -128,6 +124,11 @@ public class Constants {
          * derivative function name.
          */
         public static final String DERIVATIVE = "derivative";
+
+        /**
+         * changed function name.
+         */
+        public static final String CHANGED = "changed";
 
         /**
          * fetch function name.
@@ -228,6 +229,11 @@ public class Constants {
          * sortSeries function name (alias for sort).
          */
         public static final String SORT_SERIES = "sortSeries";
+
+        /**
+         * topK function name.
+         */
+        public static final String TOP_K = "topK";
 
         /**
          * summarize function name.
@@ -457,6 +463,16 @@ public class Constants {
              * sumSeries aggregation function name.
              */
             public static final String SUM_SERIES = "sumSeries";
+
+            /**
+             * range aggregation function name.
+             */
+            public static final String RANGE = "range";
+
+            /**
+             * rangeOfSeries aggregation function name.
+             */
+            public static final String RANGE_OF_SERIES = "rangeOfSeries";
         }
 
         /**
