@@ -65,6 +65,7 @@ import org.opensearch.tsdb.lang.m3.stage.SqrtStage;
 import org.opensearch.tsdb.lang.m3.stage.SustainStage;
 import org.opensearch.tsdb.lang.m3.stage.SubtractStage;
 import org.opensearch.tsdb.lang.m3.stage.SummarizeStage;
+import org.opensearch.tsdb.lang.m3.stage.TopKStage;
 import org.opensearch.tsdb.lang.m3.stage.SumStage;
 import org.opensearch.tsdb.lang.m3.stage.MultiplyStage;
 import org.opensearch.tsdb.lang.m3.stage.TimeshiftStage;
@@ -100,6 +101,7 @@ import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.SqrtPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.SustainPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.SummarizePlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.TimeshiftPlanNode;
+import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.TopKPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.TransformNullPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.UnionPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.ValueFilterPlanNode;
@@ -572,6 +574,17 @@ public class SourceBuilderVisitor extends M3PlanVisitor<SourceBuilderVisitor.Com
         // SortStage is a global aggregation that should be used as a coordinator stage
         SortStage sortStage = new SortStage(planNode.getSortBy(), planNode.getSortOrder());
         stageStack.add(sortStage);
+
+        return planNode.getChildren().getFirst().accept(this);
+    }
+
+    @Override
+    public ComponentHolder visit(TopKPlanNode planNode) {
+        validateChildCountExact(planNode, 1);
+
+        // TopKStage is a global aggregation with pushdown optimization
+        TopKStage topKStage = new TopKStage(planNode.getK(), planNode.getSortBy(), planNode.getSortOrder());
+        stageStack.add(topKStage);
 
         return planNode.getChildren().getFirst().accept(this);
     }

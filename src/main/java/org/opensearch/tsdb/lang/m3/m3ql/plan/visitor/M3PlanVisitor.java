@@ -41,6 +41,7 @@ import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.SustainPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.SummarizePlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.TagSubPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.TimeshiftPlanNode;
+import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.TopKPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.TransformNullPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.UnionPlanNode;
 
@@ -321,6 +322,15 @@ public abstract class M3PlanVisitor<T> {
      * @return the result of processing the SqrtPlanNode
      */
     public T visit(SqrtPlanNode planNode) {
+        return process(planNode);
+    }
+
+    /**
+     * Visit method for TopKPlanNode.
+     * @param planNode the TopKPlanNode to visit
+     * @return the result of processing the TopKPlanNode
+     */
+    public T visit(TopKPlanNode planNode) {
         return process(planNode);
     }
 
