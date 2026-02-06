@@ -29,6 +29,7 @@ import org.opensearch.tsdb.core.model.ByteLabels;
 import org.opensearch.tsdb.core.model.FloatSample;
 import org.opensearch.tsdb.core.model.Labels;
 import org.opensearch.tsdb.core.model.Sample;
+import org.opensearch.tsdb.core.model.SampleList;
 import org.opensearch.tsdb.core.reader.TSDBDocValues;
 import org.opensearch.tsdb.core.reader.TSDBLeafReader;
 import org.opensearch.tsdb.metrics.TSDBMetrics;
@@ -41,6 +42,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
@@ -144,13 +146,6 @@ public class TimeSeriesUnfoldAggregator extends BucketsAggregator {
     private static final long ARRAYLIST_OVERHEAD = 24; // Estimated ArrayList object overhead
 
     /**
-     * Warning threshold for circuit breaker usage in bytes.
-     * When circuit breaker allocation exceeds this threshold, a WARN log is emitted.
-     * This value is read from the cluster setting tsdb_engine.aggregation.circuit_breaker.warn_threshold.
-     */
-    private final long circuitBreakerWarnThreshold;
-
-    /**
      * Set output series count for testing purposes.
      * Package-private for testing.
      */
@@ -189,16 +184,6 @@ public class TimeSeriesUnfoldAggregator extends BucketsAggregator {
                     );
                 }
 
-                // Log at WARN level if total allocation exceeds threshold (potential memory issue)
-                if (circuitBreakerBytes > circuitBreakerWarnThreshold) {
-                    logger.warn(
-                        "High circuit breaker usage in aggregator '{}': {} bytes ({} MB). "
-                            + "This may indicate high cardinality data or memory leak.",
-                        name(),
-                        circuitBreakerBytes,
-                        circuitBreakerBytes / (1024 * 1024)
-                    );
-                }
             } catch (CircuitBreakingException e) {
                 // Try to get the original query source from SearchContext
                 String queryInfo = "unavailable";
@@ -217,29 +202,23 @@ public class TimeSeriesUnfoldAggregator extends BucketsAggregator {
 
                 // Log detailed information about the query that was killed
                 logger.error(
-                    "Circuit breaker tripped - Query killed by circuit breaker. "
-                        + "Aggregation: [{}], "
-                        + "Query: {}, "
-                        + "Attempted allocation: {} bytes ({} MB), "
-                        + "Total allocated by this aggregation: {} bytes ({} MB), "
-                        + "Time range: [{} - {}], "
-                        + "Step: {}, "
-                        + "Pipeline stages: {}, "
-                        + "Circuit breaker limit: {} bytes ({} MB), "
-                        + "Reason: {}",
+                    "[request] Circuit breaker tripped: used [{}/{}mb] exceeds limit [{}/{}mb], "
+                        + "aggregation [{}]. "
+                        + "Attempted: {} bytes, Total by agg: {} bytes, "
+                        + "Time range: [{}-{}], Step: {}, Stages: {}. "
+                        + "Query: {}",
+                    e.getBytesWanted(),
+                    String.format(Locale.ROOT, "%.2f", e.getBytesWanted() / (1024.0 * 1024.0)),
+                    e.getByteLimit(),
+                    String.format(Locale.ROOT, "%.2f", e.getByteLimit() / (1024.0 * 1024.0)),
                     name(),
-                    queryInfo,
                     bytes,
-                    bytes / (1024.0 * 1024.0),
                     circuitBreakerBytes,
-                    circuitBreakerBytes / (1024.0 * 1024.0),
                     minTimestamp,
                     maxTimestamp,
                     step,
-                    stages != null ? stages.size() + " stages" : "no stages",
-                    e.getByteLimit(),
-                    e.getByteLimit() / (1024.0 * 1024.0),
-                    e.getMessage()
+                    stages != null ? stages.size() : 0,
+                    queryInfo
                 );
 
                 // Increment circuit breaker trips counter
@@ -264,7 +243,6 @@ public class TimeSeriesUnfoldAggregator extends BucketsAggregator {
      * @param minTimestamp The minimum timestamp for filtering
      * @param maxTimestamp The maximum timestamp for filtering
      * @param step The step size for timestamp alignment
-     * @param circuitBreakerWarnThreshold The circuit breaker warning threshold in bytes
      * @param metadata The aggregation metadata
      * @throws IOException If an error occurs during initialization
      */
@@ -278,7 +256,6 @@ public class TimeSeriesUnfoldAggregator extends BucketsAggregator {
         long minTimestamp,
         long maxTimestamp,
         long step,
-        long circuitBreakerWarnThreshold,
         Map<String, Object> metadata
     ) throws IOException {
         super(name, factories, context, parent, bucketCardinality, metadata);
@@ -287,21 +264,10 @@ public class TimeSeriesUnfoldAggregator extends BucketsAggregator {
         this.minTimestamp = minTimestamp;
         this.maxTimestamp = maxTimestamp;
         this.step = step;
-        this.circuitBreakerWarnThreshold = circuitBreakerWarnThreshold;
 
         // Calculate theoretical maximum aligned timestamp
         // This is the largest timestamp aligned to (minTimestamp + N * step) that is < maxTimestamp
         this.theoreticalMaxTimestamp = TimeSeries.calculateAlignedMaxTimestamp(minTimestamp, maxTimestamp, step);
-    }
-
-    /**
-     * Get the circuit breaker warning threshold.
-     * Package-private for testing.
-     *
-     * @return the circuit breaker warning threshold in bytes
-     */
-    long getCircuitBreakerWarnThreshold() {
-        return circuitBreakerWarnThreshold;
     }
 
     @Override
@@ -483,9 +449,9 @@ public class TimeSeriesUnfoldAggregator extends BucketsAggregator {
             if (existingSeries != null) {
                 // Merge samples from same time series using helper
                 // Assume data points within each chunk are sorted by timestamp
-                List<Sample> mergedSamples = MERGE_HELPER.merge(
+                SampleList mergedSamples = MERGE_HELPER.merge(
                     existingSeries.getSamples(),
-                    alignedSamples,
+                    SampleList.fromList(alignedSamples),
                     true // assumeSorted - data points within each chunk are sorted
                 );
 
@@ -645,7 +611,6 @@ public class TimeSeriesUnfoldAggregator extends BucketsAggregator {
             }
             return results;
         } finally {
-            // Emit all metrics in one batch - minimal overhead
             recordMetrics();
         }
     }
@@ -742,9 +707,9 @@ public class TimeSeriesUnfoldAggregator extends BucketsAggregator {
                 TSDBMetrics.incrementCounter(TSDBMetrics.AGGREGATION.resultsTotal, 1, TAGS_STATUS_EMPTY);
             }
 
-            // Record circuit breaker bytes
+            // Record circuit breaker MiB (histogram for distribution tracking)
             if (circuitBreakerBytes > 0) {
-                TSDBMetrics.recordHistogram(TSDBMetrics.AGGREGATION.circuitBreakerBytes, circuitBreakerBytes);
+                TSDBMetrics.recordHistogram(TSDBMetrics.AGGREGATION.circuitBreakerMiB, circuitBreakerBytes / (1024.0 * 1024.0));
             }
         } catch (Exception e) {
             // Swallow exceptions in metrics recording to avoid impacting actual operation

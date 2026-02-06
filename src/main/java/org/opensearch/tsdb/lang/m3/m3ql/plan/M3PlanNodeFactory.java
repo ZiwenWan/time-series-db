@@ -16,6 +16,7 @@ import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.AliasByTagsPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.AliasPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.ExcludeByTagPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.DerivativePlanNode;
+import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.DivideScalarPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.FallbackSeriesConstantPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.TagSubPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.ValueFilterPlanNode;
@@ -25,15 +26,19 @@ import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.HistogramPercentilePlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.IntegralPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.IsNonNullPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.KeepLastValuePlanNode;
+import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.LogarithmPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.M3PlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.MovingPlanNode;
+import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.OffsetPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.PerSecondPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.PerSecondRatePlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.PercentileOfSeriesPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.RemoveEmptyPlanNode;
+import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.RoundPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.ScalePlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.ScaleToSecondsPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.ShowTagsPlanNode;
+import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.SqrtPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.SortPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.SustainPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.SummarizePlanNode;
@@ -115,12 +120,24 @@ public class M3PlanNodeFactory {
                 return ScalePlanNode.of(functionNode);
             case Constants.Functions.SCALE_TO_SECONDS:
                 return ScaleToSecondsPlanNode.of(functionNode);
+            case Constants.Functions.DIVIDE_SCALAR:
+                return DivideScalarPlanNode.of(functionNode);
             case Constants.Functions.SUSTAIN:
                 return SustainPlanNode.of(functionNode);
             case Constants.Functions.TIMESHIFT:
                 return TimeshiftPlanNode.of(functionNode);
             case Constants.Functions.TRANSFORM_NULL:
                 return TransformNullPlanNode.of(functionNode);
+            case Constants.Functions.LOGARITHM:
+            case Constants.Functions.LOG:
+                return LogarithmPlanNode.of(functionNode);
+            case Constants.Functions.SQRT:
+            case Constants.Functions.SQUARE_ROOT:
+                return SqrtPlanNode.of(functionNode);
+            case Constants.Functions.OFFSET:
+                return OffsetPlanNode.of(functionNode);
+            case Constants.Functions.ROUND:
+                return RoundPlanNode.of(functionNode);
             case Constants.Functions.ValueFilter.EQ:
             case Constants.Functions.ValueFilter.EQUALS:
             case Constants.Functions.ValueFilter.GE:
