@@ -113,26 +113,20 @@ public class AliasByBucketStage implements UnaryPipelineStage {
             throw new IllegalArgumentException("Bucket tag '" + tagName + "' exists but has no value in " + seriesDescription);
         }
 
-        try {
-            // Create a placeholder bucket ID since we only need the range parsing
-            BucketParsingUtils.BucketInfo bucketInfo = new BucketParsingUtils.BucketInfo("", bucketRangeValue);
+        BucketParsingUtils.BucketInfo bucketInfo = new BucketParsingUtils.BucketInfo("", bucketRangeValue);
 
-            double upperBound = bucketInfo.getUpperBound();
-            double lowerBound = bucketInfo.getLowerBound();
+        double upperBound = bucketInfo.getUpperBound();
+        double lowerBound = bucketInfo.getLowerBound();
 
-            // Use upper bound, but fall back to lower bound if upper bound is infinity
-            if (Double.isInfinite(upperBound)) {
-                if (Double.isInfinite(lowerBound)) {
-                    return "infinity";
-                } else {
-                    return formatBound(lowerBound);
-                }
+        // Use upper bound, but fall back to lower bound if upper bound is infinity
+        if (Double.isInfinite(upperBound)) {
+            if (Double.isInfinite(lowerBound)) {
+                return "infinity";
             } else {
-                return formatBound(upperBound);
+                return formatBound(lowerBound);
             }
-        } catch (IllegalArgumentException e) {
-            // If parsing fails, return the original value
-            return bucketRangeValue;
+        } else {
+            return formatBound(upperBound);
         }
     }
 

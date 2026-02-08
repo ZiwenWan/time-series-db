@@ -24,11 +24,18 @@ import static org.opensearch.core.xcontent.ToXContent.EMPTY_PARAMS;
 public class AliasByBucketStageTests extends AbstractWireSerializingTestCase<AliasByBucketStage> {
 
     public void testValueBucket() {
-        AliasByBucketStage stage = new AliasByBucketStage("le");
-        TimeSeries ts = new TimeSeries(List.of(new FloatSample(10L, 1.0)), ByteLabels.fromStrings("le", "10.5"), 10L, 10L, 10L, null);
+        AliasByBucketStage stage = new AliasByBucketStage("bucket");
+        TimeSeries ts = new TimeSeries(List.of(new FloatSample(10L, 1.0)), ByteLabels.fromStrings("bucket", "5-10.5"), 10L, 10L, 10L, null);
 
         List<TimeSeries> result = stage.process(List.of(ts));
         assertEquals("10.5", result.get(0).getAlias());
+    }
+
+    public void testInvalidBucketFormatThrowsError() {
+        AliasByBucketStage stage = new AliasByBucketStage("le");
+        TimeSeries ts = new TimeSeries(List.of(new FloatSample(10L, 1.0)), ByteLabels.fromStrings("le", "0.1"), 10L, 10L, 10L, null);
+
+        assertThrows(IllegalArgumentException.class, () -> stage.process(List.of(ts)));
     }
 
     public void testDurationBucket() {
