@@ -67,6 +67,7 @@ import org.opensearch.tsdb.query.search.TimeRangePruningQueryBuilder;
 import org.opensearch.tsdb.query.aggregator.InternalTimeSeries;
 import org.opensearch.tsdb.query.aggregator.InternalTSDBStats;
 import org.opensearch.tsdb.query.aggregator.TimeSeriesCoordinatorAggregationBuilder;
+import org.opensearch.tsdb.query.aggregator.TimeSeriesStreamingAggregationBuilder;
 import org.opensearch.tsdb.query.aggregator.TimeSeriesUnfoldAggregationBuilder;
 import org.opensearch.tsdb.query.aggregator.TSDBStatsAggregationBuilder;
 import org.opensearch.tsdb.query.rest.RemoteIndexSettingsCache;
@@ -620,6 +621,19 @@ public class TSDBPlugin extends Plugin implements SearchPlugin, EnginePlugin, Ac
     );
 
     /**
+     * Setting to enable streaming aggregator optimization for simple fetch + aggregation queries.
+     * When enabled, eligible queries like "fetch | sum" will use TimeSeriesStreamingAggregator
+     * instead of TimeSeriesUnfoldAggregator for better performance.
+     * This is experimental and disabled by default for backward compatibility.
+     */
+    public static final Setting<Boolean> TSDB_ENGINE_ENABLE_STREAMING_AGGREGATOR = Setting.boolSetting(
+        "index.tsdb.streaming_aggregator.enable",
+        false,  // default: false (disabled)
+        Setting.Property.IndexScope,
+        Setting.Property.Dynamic
+    );
+
+    /**
      * Default constructor
      */
     public TSDBPlugin() {}
@@ -755,7 +769,8 @@ public class TSDBPlugin extends Plugin implements SearchPlugin, EnginePlugin, Ac
             TSDB_ENGINE_REMOTE_INDEX_SETTINGS_CACHE_MAX_SIZE,
             TSDB_INGESTION_LAG_COORDINATOR_METRICS_ENABLED,
             TSDB_INGESTION_LAG_SEARCHABLE_METRICS_ENABLED,
-            TSDB_ENGINE_INTERNAL_TIME_SERIES_FORMAT
+            TSDB_ENGINE_INTERNAL_TIME_SERIES_FORMAT,
+            TSDB_ENGINE_ENABLE_STREAMING_AGGREGATOR
         );
     }
 
@@ -801,7 +816,12 @@ public class TSDBPlugin extends Plugin implements SearchPlugin, EnginePlugin, Ac
             ).addResultReader(InternalTimeSeries::new).setAggregatorRegistrar(TimeSeriesUnfoldAggregationBuilder::registerAggregators),
             new AggregationSpec(TSDBStatsAggregationBuilder.NAME, TSDBStatsAggregationBuilder::new, TSDBStatsAggregationBuilder::parse)
                 .addResultReader(InternalTSDBStats::new)
-                .setAggregatorRegistrar(TSDBStatsAggregationBuilder::registerAggregators)
+                .setAggregatorRegistrar(TSDBStatsAggregationBuilder::registerAggregators),
+            new AggregationSpec(
+                TimeSeriesStreamingAggregationBuilder.NAME,
+                TimeSeriesStreamingAggregationBuilder::new,
+                TimeSeriesStreamingAggregationBuilder::parse
+            ).addResultReader(InternalTimeSeries::new).setAggregatorRegistrar(TimeSeriesStreamingAggregationBuilder::registerAggregators)
         );
     }
 

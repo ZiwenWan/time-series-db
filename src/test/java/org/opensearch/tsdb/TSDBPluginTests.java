@@ -12,6 +12,8 @@ import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.apache.lucene.store.Directory;
 import org.opensearch.cluster.metadata.IndexMetadata;
@@ -40,6 +42,7 @@ import org.opensearch.test.IndexSettingsModule;
 import org.opensearch.test.OpenSearchTestCase;
 import org.opensearch.tsdb.query.aggregator.TSDBStatsAggregationBuilder;
 import org.opensearch.tsdb.query.aggregator.TimeSeriesCoordinatorAggregationBuilder;
+import org.opensearch.tsdb.query.aggregator.TimeSeriesStreamingAggregationBuilder;
 import org.opensearch.tsdb.query.aggregator.TimeSeriesUnfoldAggregationBuilder;
 import org.opensearch.tsdb.query.rest.RestM3QLAction;
 import org.opensearch.tsdb.query.rest.RestPromQLAction;
@@ -82,10 +85,16 @@ public class TSDBPluginTests extends OpenSearchTestCase {
         List<Setting<?>> settings = plugin.getSettings();
 
         assertNotNull("Settings list should not be null", settings);
-        assertThat("Should have 27 settings", settings, hasSize(27));
+        assertThat("Should have 28 settings", settings, hasSize(28));
 
         // Verify TSDB_ENGINE_ENABLED is present
         assertTrue("Should contain TSDB_ENGINE_ENABLED setting", settings.contains(TSDBPlugin.TSDB_ENGINE_ENABLED));
+
+        // Verify TSDB_ENGINE_ENABLE_STREAMING_AGGREGATOR is present
+        assertTrue(
+            "Should contain TSDB_ENGINE_ENABLE_STREAMING_AGGREGATOR setting",
+            settings.contains(TSDBPlugin.TSDB_ENGINE_ENABLE_STREAMING_AGGREGATOR)
+        );
 
         assertTrue("Should contain TSDB_ENGINE_RETENTION_TIME_SETTING setting", settings.contains(TSDBPlugin.TSDB_ENGINE_RETENTION_TIME));
 
@@ -344,17 +353,17 @@ public class TSDBPluginTests extends OpenSearchTestCase {
         List<SearchPlugin.AggregationSpec> aggregations = plugin.getAggregations();
 
         assertNotNull("Aggregations list should not be null", aggregations);
-        assertThat("Should have 2 aggregations", aggregations, hasSize(2));
+        assertThat("Should have 3 aggregations", aggregations, hasSize(3));
 
-        SearchPlugin.AggregationSpec spec1 = aggregations.get(0);
-        assertThat(
-            "First aggregation name should match",
-            spec1.getName().getPreferredName(),
-            equalTo(TimeSeriesUnfoldAggregationBuilder.NAME)
+        // Verify all aggregations are present
+        Set<String> aggregationNames = aggregations.stream().map(spec -> spec.getName().getPreferredName()).collect(Collectors.toSet());
+
+        assertTrue("Should contain TimeSeriesUnfoldAggregationBuilder", aggregationNames.contains(TimeSeriesUnfoldAggregationBuilder.NAME));
+        assertTrue("Should contain TSDBStatsAggregationBuilder", aggregationNames.contains(TSDBStatsAggregationBuilder.NAME));
+        assertTrue(
+            "Should contain TimeSeriesStreamingAggregationBuilder",
+            aggregationNames.contains(TimeSeriesStreamingAggregationBuilder.NAME)
         );
-
-        SearchPlugin.AggregationSpec spec2 = aggregations.get(1);
-        assertThat("Second aggregation name should match", spec2.getName().getPreferredName(), equalTo(TSDBStatsAggregationBuilder.NAME));
     }
 
     public void testGetPipelineAggregations() {
