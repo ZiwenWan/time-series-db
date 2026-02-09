@@ -19,6 +19,7 @@ import org.opensearch.tsdb.query.stage.UnaryPipelineStage;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -103,7 +104,7 @@ public class MapKeyStage implements UnaryPipelineStage {
 
         // Create new labels with the key renamed
         // Build map with all labels except the old key, plus the new key
-        Map<String, String> labelMap = new java.util.HashMap<>(seriesLabels.toMapView());
+        Map<String, String> labelMap = new HashMap<>(seriesLabels.toMapView());
         labelMap.remove(oldKey);
         labelMap.put(newKey, value);
 
