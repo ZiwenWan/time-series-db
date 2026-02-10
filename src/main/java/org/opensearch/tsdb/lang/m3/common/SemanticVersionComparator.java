@@ -25,24 +25,16 @@ public class SemanticVersionComparator {
     }
 
     /**
-     * Semantic version regex pattern for validation after normalization.
-     * Matches: vMAJOR.MINOR.PATCH with optional prerelease and build metadata
-     */
-    private static final Pattern SEMVER_PATTERN = Pattern.compile(
-        "^v(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
-    );
-
-    /**
      * Pattern to extract version components from normalized version string.
      */
     private static final Pattern VERSION_EXTRACT_PATTERN = Pattern.compile("^v(\\d+)\\.(\\d+)\\.(\\d+)(?:-(.*?))?(?:\\+(.*?))?$");
 
     /**
      * Determines if a string represents a semantic version using flexible detection.
-     * Applies normalization first, then validates against semantic version pattern.
+     * Attempts normalization — if it succeeds, the value is a valid semantic version.
      *
      * @param value the string to check
-     * @return true if the value is a semantic version after normalization
+     * @return true if the value can be normalized to a semantic version
      */
     public static boolean isSemanticVersion(String value) {
         if (value == null || value.trim().isEmpty()) {
@@ -50,8 +42,8 @@ public class SemanticVersionComparator {
         }
 
         try {
-            String normalizedVersion = normalizeVersion(value);
-            return SEMVER_PATTERN.matcher(normalizedVersion).matches();
+            normalizeVersion(value);
+            return true;
         } catch (Exception e) {
             return false;
         }
