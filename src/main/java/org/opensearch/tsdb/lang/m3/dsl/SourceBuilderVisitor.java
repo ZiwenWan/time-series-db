@@ -19,8 +19,10 @@ import org.opensearch.telemetry.metrics.tags.Tags;
 import org.opensearch.tsdb.core.mapping.Constants;
 import org.opensearch.tsdb.core.model.LabelConstants;
 import org.opensearch.tsdb.lang.m3.common.AggregationType;
+import org.opensearch.tsdb.lang.m3.common.HeadTailMode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.AbsPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.AsPercentPlanNode;
+import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.ChangedPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.DiffPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.DivideScalarPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.DividePlanNode;
@@ -32,6 +34,7 @@ import org.opensearch.tsdb.lang.m3.stage.AbsStage;
 import org.opensearch.tsdb.lang.m3.stage.AliasByTagsStage;
 import org.opensearch.tsdb.lang.m3.stage.AliasStage;
 import org.opensearch.tsdb.lang.m3.stage.AsPercentStage;
+import org.opensearch.tsdb.lang.m3.stage.ChangedStage;
 import org.opensearch.tsdb.lang.m3.stage.CopyStage;
 import org.opensearch.tsdb.lang.m3.stage.ExcludeByTagStage;
 import org.opensearch.tsdb.lang.m3.stage.TagSubStage;
@@ -60,7 +63,7 @@ import org.opensearch.tsdb.lang.m3.stage.DerivativeStage;
 import org.opensearch.tsdb.lang.m3.stage.IntegralStage;
 import org.opensearch.tsdb.lang.m3.stage.ScaleStage;
 import org.opensearch.tsdb.lang.m3.stage.ScaleToSecondsStage;
-import org.opensearch.tsdb.lang.m3.stage.HeadStage;
+import org.opensearch.tsdb.lang.m3.stage.SliceStage;
 import org.opensearch.tsdb.lang.m3.stage.ShowTagsStage;
 import org.opensearch.tsdb.lang.m3.stage.SortStage;
 import org.opensearch.tsdb.lang.m3.stage.SqrtStage;
@@ -85,6 +88,7 @@ import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.DerivativePlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.FallbackSeriesConstantPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.FetchPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.HeadPlanNode;
+import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.TailPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.HistogramPercentilePlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.IntegralPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.KeepLastValuePlanNode;
@@ -299,6 +303,13 @@ public class SourceBuilderVisitor extends M3PlanVisitor<SourceBuilderVisitor.Com
         validateChildCountExact(planNode, 2);
 
         return unionAndBinaryHandler(planNode);
+    }
+
+    @Override
+    public ComponentHolder visit(ChangedPlanNode planNode) {
+        validateChildCountExact(planNode, 1);
+        stageStack.add(new ChangedStage());
+        return planNode.getChildren().getFirst().accept(this);
     }
 
     @Override
@@ -589,9 +600,20 @@ public class SourceBuilderVisitor extends M3PlanVisitor<SourceBuilderVisitor.Com
     public ComponentHolder visit(HeadPlanNode planNode) {
         validateChildCountExact(planNode, 1);
 
-        // HeadStage is a coordinator-only stage
-        HeadStage headStage = new HeadStage(planNode.getLimit());
-        stageStack.add(headStage);
+        // Create SliceStage with HEAD mode
+        SliceStage sliceStage = new SliceStage(planNode.getLimit(), HeadTailMode.HEAD);
+        stageStack.add(sliceStage);
+
+        return planNode.getChildren().getFirst().accept(this);
+    }
+
+    @Override
+    public ComponentHolder visit(TailPlanNode planNode) {
+        validateChildCountExact(planNode, 1);
+
+        // Create SliceStage with TAIL mode
+        SliceStage sliceStage = new SliceStage(planNode.getLimit(), HeadTailMode.TAIL);
+        stageStack.add(sliceStage);
 
         return planNode.getChildren().getFirst().accept(this);
     }

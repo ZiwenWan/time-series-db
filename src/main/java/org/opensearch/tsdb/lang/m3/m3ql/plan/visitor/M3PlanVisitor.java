@@ -12,6 +12,7 @@ import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.AggregationPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.AliasByTagsPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.AliasPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.BinaryPlanNode;
+import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.ChangedPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.DerivativePlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.DivideScalarPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.ExcludeByTagPlanNode;
@@ -20,6 +21,7 @@ import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.RoundPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.ValueFilterPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.FetchPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.HeadPlanNode;
+import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.TailPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.HistogramPercentilePlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.IntegralPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.KeepLastValuePlanNode;
@@ -114,6 +116,15 @@ public abstract class M3PlanVisitor<T> {
     }
 
     /**
+     * Visit method for ChangedPlanNode.
+     * @param planNode the ChangedPlanNode to visit
+     * @return the result of processing the ChangedPlanNode
+     */
+    public T visit(ChangedPlanNode planNode) {
+        return process(planNode);
+    }
+
+    /**
      * Visit method for ExcludeByTagPlanNode.
      * @param planNode the ExcludeByTagPlanNode to visit
      * @return the result of processing the ExcludeByTagPlanNode
@@ -200,6 +211,15 @@ public abstract class M3PlanVisitor<T> {
      * @return the result of processing the HeadPlanNode
      */
     public T visit(HeadPlanNode planNode) {
+        return process(planNode);
+    }
+
+    /**
+     * Visit method for TailPlanNode.
+     * @param planNode the TailPlanNode to visit
+     * @return the result of processing the TailPlanNode
+     */
+    public T visit(TailPlanNode planNode) {
         return process(planNode);
     }
 

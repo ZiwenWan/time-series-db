@@ -51,7 +51,6 @@ public class Constants {
             "asMultiBurnRate",
             "burnRate",
             "burnRateMultiplier",
-            "changed",
             "constantLine",
             "divideWhen",
             "histogramCDF",
@@ -72,7 +71,6 @@ public class Constants {
             "sustainedAbove",
             "sustainedBelow",
             "switch",
-            "tail",
             "timestamp",
             "toHistogram",
             "toHistogramLinearBuckets"
@@ -139,6 +137,11 @@ public class Constants {
         public static final String DERIVATIVE = "derivative";
 
         /**
+         * changed function name.
+         */
+        public static final String CHANGED = "changed";
+
+        /**
          * fetch function name.
          */
         public static final String FETCH = "fetch";
@@ -147,6 +150,11 @@ public class Constants {
          * head function name.
          */
         public static final String HEAD = "head";
+
+        /**
+         * tail function name.
+         */
+        public static final String TAIL = "tail";
 
         /**
          * histogramPercentile function name.
