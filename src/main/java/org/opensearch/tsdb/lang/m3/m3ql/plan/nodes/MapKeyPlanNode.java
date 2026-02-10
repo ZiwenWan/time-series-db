@@ -64,8 +64,8 @@ public class MapKeyPlanNode extends M3PlanNode {
 
     /**
      * Factory method to create a MapKeyPlanNode from a FunctionNode.
-     * Expects the function node to have exactly 2 children that are ValueNodes
-     * representing the old key and new key.
+     * Expects the function node to have exactly 2 children that are ValueNodes.
+     * Syntax: mapKey key replacement (first arg = existing key to rename, second arg = new name).
      *
      * @param functionNode the function node to convert
      * @return an instance of MapKeyPlanNode
@@ -74,25 +74,25 @@ public class MapKeyPlanNode extends M3PlanNode {
     public static MapKeyPlanNode of(FunctionNode functionNode) {
         int argCount = functionNode.getChildren().size();
         if (argCount != 2) {
-            throw new IllegalArgumentException("MapKey function requires exactly 2 arguments: newKey and oldKey");
+            throw new IllegalArgumentException("MapKey function requires exactly 2 arguments: key and replacement");
         }
 
-        // Parse new key (first argument)
-        if (!(functionNode.getChildren().get(0) instanceof ValueNode newKeyNode)) {
-            throw new IllegalArgumentException("First argument must be a value representing new key name");
-        }
-        String newKey = Utils.stripDoubleQuotes(newKeyNode.getValue());
-        if (newKey.trim().isEmpty()) {
-            throw new IllegalArgumentException("New key cannot be empty");
-        }
-
-        // Parse old key (second argument)
-        if (!(functionNode.getChildren().get(1) instanceof ValueNode oldKeyNode)) {
-            throw new IllegalArgumentException("Second argument must be a value representing old key name");
+        // Parse old key (first argument - the existing key to rename)
+        if (!(functionNode.getChildren().get(0) instanceof ValueNode oldKeyNode)) {
+            throw new IllegalArgumentException("First argument must be a value representing the key to rename");
         }
         String oldKey = Utils.stripDoubleQuotes(oldKeyNode.getValue());
         if (oldKey.trim().isEmpty()) {
-            throw new IllegalArgumentException("Old key cannot be empty");
+            throw new IllegalArgumentException("Key cannot be empty");
+        }
+
+        // Parse new key (second argument - the replacement name)
+        if (!(functionNode.getChildren().get(1) instanceof ValueNode newKeyNode)) {
+            throw new IllegalArgumentException("Second argument must be a value representing the replacement name");
+        }
+        String newKey = Utils.stripDoubleQuotes(newKeyNode.getValue());
+        if (newKey.trim().isEmpty()) {
+            throw new IllegalArgumentException("Replacement cannot be empty");
         }
 
         return new MapKeyPlanNode(M3PlannerContext.generateId(), oldKey, newKey);

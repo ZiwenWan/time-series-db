@@ -117,8 +117,15 @@ public class TagCompareStage implements UnaryPipelineStage {
             return false;
         }
 
-        // Apply comparison using semantic version comparator
-        return SemanticVersionComparator.applyComparison(seriesValue, operator, compareValue);
+        // Use semantic comparison if the comparison value is a semantic version, otherwise lexicographic
+        if (SemanticVersionComparator.isSemanticVersion(compareValue)) {
+            if (!SemanticVersionComparator.isSemanticVersion(seriesValue)) {
+                return false;
+            }
+            return operator.apply(SemanticVersionComparator.compareSemanticVersions(seriesValue, compareValue));
+        } else {
+            return operator.apply(seriesValue.compareTo(compareValue));
+        }
     }
 
     @Override

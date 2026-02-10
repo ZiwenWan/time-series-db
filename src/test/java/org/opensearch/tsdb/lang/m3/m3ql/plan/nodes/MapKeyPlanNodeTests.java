@@ -36,10 +36,11 @@ public class MapKeyPlanNodeTests extends BasePlanNodeTests {
     }
 
     public void testFactoryMethod() {
+        // mapKey city cityName → renames "city" to "cityName"
         FunctionNode fn = new FunctionNode();
         fn.setFunctionName("mapKey");
-        fn.addChildNode(new ValueNode("cityName"));
         fn.addChildNode(new ValueNode("city"));
+        fn.addChildNode(new ValueNode("cityName"));
 
         MapKeyPlanNode node = MapKeyPlanNode.of(fn);
         assertEquals("city", node.getOldKey());
@@ -47,10 +48,11 @@ public class MapKeyPlanNodeTests extends BasePlanNodeTests {
     }
 
     public void testFactoryMethodWithQuotedValues() {
+        // mapKey env environment → renames "env" to "environment"
         FunctionNode fn = new FunctionNode();
         fn.setFunctionName("mapKey");
-        fn.addChildNode(new ValueNode("\"environment\""));
         fn.addChildNode(new ValueNode("\"env\""));
+        fn.addChildNode(new ValueNode("\"environment\""));
 
         MapKeyPlanNode node = MapKeyPlanNode.of(fn);
         assertEquals("env", node.getOldKey());
@@ -95,18 +97,18 @@ public class MapKeyPlanNodeTests extends BasePlanNodeTests {
         expectThrows(IllegalArgumentException.class, () -> MapKeyPlanNode.of(fn));
     }
 
-    public void testFactoryMethodEmptyNewKey() {
-        FunctionNode fn = new FunctionNode();
-        fn.setFunctionName("mapKey");
-        fn.addChildNode(new ValueNode("\"\""));
-        fn.addChildNode(new ValueNode("old"));
-        expectThrows(IllegalArgumentException.class, () -> MapKeyPlanNode.of(fn));
-    }
-
     public void testFactoryMethodEmptyOldKey() {
         FunctionNode fn = new FunctionNode();
         fn.setFunctionName("mapKey");
-        fn.addChildNode(new ValueNode("new"));
+        fn.addChildNode(new ValueNode("\"\""));
+        fn.addChildNode(new ValueNode("newKey"));
+        expectThrows(IllegalArgumentException.class, () -> MapKeyPlanNode.of(fn));
+    }
+
+    public void testFactoryMethodEmptyNewKey() {
+        FunctionNode fn = new FunctionNode();
+        fn.setFunctionName("mapKey");
+        fn.addChildNode(new ValueNode("oldKey"));
         fn.addChildNode(new ValueNode("\"\""));
         expectThrows(IllegalArgumentException.class, () -> MapKeyPlanNode.of(fn));
     }

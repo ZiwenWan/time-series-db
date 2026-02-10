@@ -193,38 +193,6 @@ public class SemanticVersionComparator {
     }
 
     /**
-     * Applies a comparison operator to two version strings.
-     * Automatically detects whether to use semantic or lexicographic comparison.
-     *
-     * @param seriesValue the value from the time series tag
-     * @param operator the comparison operator
-     * @param comparisonValue the value to compare against (determines comparison mode)
-     * @return true if the comparison condition is satisfied
-     */
-    public static boolean applyComparison(String seriesValue, TagComparisonOperator operator, String comparisonValue) {
-        if (seriesValue == null || comparisonValue == null) {
-            return false;
-        }
-
-        // Decision: Use semantic comparison if comparison value is a semantic version
-        boolean useSemanticComparison = isSemanticVersion(comparisonValue);
-
-        if (useSemanticComparison) {
-            // Series value must also be a valid semantic version for semantic comparison
-            if (!isSemanticVersion(seriesValue)) {
-                return false; // Filter out invalid versions
-            }
-
-            int result = compareSemanticVersions(seriesValue, comparisonValue);
-            return operator.apply(result);
-        } else {
-            // Use lexicographic string comparison
-            int result = seriesValue.compareTo(comparisonValue);
-            return operator.apply(result);
-        }
-    }
-
-    /**
      * Internal class to hold version components.
      */
     private static class VersionComponents {

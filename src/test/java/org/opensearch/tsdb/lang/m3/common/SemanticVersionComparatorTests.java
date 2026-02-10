@@ -92,57 +92,10 @@ public class SemanticVersionComparatorTests extends OpenSearchTestCase {
         assertThrows(IllegalArgumentException.class, () -> SemanticVersionComparator.compareSemanticVersions(null, "1.2.3"));
     }
 
-    public void testApplyComparisonSemanticMode() {
-        // When comparison value is semantic version, use semantic comparison
-        String comparisonValue = "1.2.0";  // This is semantic version
-        assertTrue(SemanticVersionComparator.isSemanticVersion(comparisonValue));
-
-        // Valid series values with semantic comparison
-        assertTrue(SemanticVersionComparator.applyComparison("1.1.0", TagComparisonOperator.LT, comparisonValue));
-        assertFalse(SemanticVersionComparator.applyComparison("1.3.0", TagComparisonOperator.LT, comparisonValue));
-        assertTrue(SemanticVersionComparator.applyComparison("1.2.0", TagComparisonOperator.EQ, comparisonValue));
-        assertFalse(SemanticVersionComparator.applyComparison("1.2.1", TagComparisonOperator.EQ, comparisonValue));
-
-        // Invalid series values should be filtered out (return false)
-        assertFalse(SemanticVersionComparator.applyComparison("invalid", TagComparisonOperator.LT, comparisonValue));
-        assertFalse(SemanticVersionComparator.applyComparison("abc", TagComparisonOperator.EQ, comparisonValue));
-    }
-
-    public void testApplyComparisonLexicographicMode() {
-        // When comparison value is not semantic version, use lexicographic comparison
-        String comparisonValue = "denver";  // This is not a semantic version
-        assertFalse(SemanticVersionComparator.isSemanticVersion(comparisonValue));
-
-        // Lexicographic string comparison
-        assertTrue(SemanticVersionComparator.applyComparison("atlanta", TagComparisonOperator.LT, comparisonValue));
-        assertTrue(SemanticVersionComparator.applyComparison("boston", TagComparisonOperator.LT, comparisonValue));
-        assertTrue(SemanticVersionComparator.applyComparison("chicago", TagComparisonOperator.LT, comparisonValue));
-        assertFalse(SemanticVersionComparator.applyComparison("denver", TagComparisonOperator.LT, comparisonValue));
-        assertFalse(SemanticVersionComparator.applyComparison("florida", TagComparisonOperator.LT, comparisonValue));
-
-        assertTrue(SemanticVersionComparator.applyComparison("denver", TagComparisonOperator.EQ, comparisonValue));
-        assertFalse(SemanticVersionComparator.applyComparison("atlanta", TagComparisonOperator.EQ, comparisonValue));
-    }
-
-    public void testApplyComparisonNullInputs() {
-        assertFalse(SemanticVersionComparator.applyComparison(null, TagComparisonOperator.EQ, "1.0.0"));
-        assertFalse(SemanticVersionComparator.applyComparison("1.0.0", TagComparisonOperator.EQ, null));
-        assertFalse(SemanticVersionComparator.applyComparison(null, TagComparisonOperator.EQ, null));
-    }
-
-    public void testAllComparisonOperators() {
-        String v1 = "1.0.0";
-        String v2 = "2.0.0";
-
-        assertTrue(SemanticVersionComparator.applyComparison(v1, TagComparisonOperator.LT, v2));
-        assertTrue(SemanticVersionComparator.applyComparison(v1, TagComparisonOperator.LE, v2));
-        assertTrue(SemanticVersionComparator.applyComparison(v1, TagComparisonOperator.LE, v1));
-        assertFalse(SemanticVersionComparator.applyComparison(v1, TagComparisonOperator.GT, v2));
-        assertFalse(SemanticVersionComparator.applyComparison(v1, TagComparisonOperator.GE, v2));
-        assertTrue(SemanticVersionComparator.applyComparison(v1, TagComparisonOperator.GE, v1));
-        assertTrue(SemanticVersionComparator.applyComparison(v1, TagComparisonOperator.EQ, v1));
-        assertFalse(SemanticVersionComparator.applyComparison(v1, TagComparisonOperator.EQ, v2));
-        assertTrue(SemanticVersionComparator.applyComparison(v1, TagComparisonOperator.NE, v2));
-        assertFalse(SemanticVersionComparator.applyComparison(v1, TagComparisonOperator.NE, v1));
+    public void testSemanticVersionComparisonAllOperatorsViaCompare() {
+        // Test compareSemanticVersions result can be used with all comparison operators
+        assertTrue(SemanticVersionComparator.compareSemanticVersions("1.0.0", "2.0.0") < 0);
+        assertTrue(SemanticVersionComparator.compareSemanticVersions("2.0.0", "1.0.0") > 0);
+        assertEquals(0, SemanticVersionComparator.compareSemanticVersions("1.0.0", "1.0.0"));
     }
 }
