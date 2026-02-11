@@ -207,19 +207,19 @@ test_case:
         values: [10, 20, 30, 40, 50, null, null]
 
       # test_case_alias_basic
-      - labels: "__name__:cpu_usage,dc:dca1,test:alias_basic"
+      - labels: "name:cpu_usage,dc:dca1,test:alias_basic"
         values: [1, 2, 3, 4, null, null, null]
 
       # test_case_aliasByTags_basic
-      - labels: "__name__:requests,service:web,dc:dca1,test:aliasByTags_basic"
+      - labels: "name:requests,service:web,dc:dca1,test:aliasByTags_basic"
         values: [100, 200, 300, null, null, null, null]
 
       # test_case_aliasByTags_single
-      - labels: "__name__:latency,service:payment,dc:dca1,test:aliasByTags_single"
+      - labels: "name:latency,service:payment,dc:dca1,test:aliasByTags_single"
         values: [50, 75, 60, null, null, null, null]
 
       # test_case_showTags_basic
-      - labels: "__name__:requests,service:web,dc:dca1,env:prod,test:showTags_basic"
+      - labels: "name:requests,service:web,dc:dca1,env:prod,test:showTags_basic"
         values: [10, 20, 30, null, null, null, null]
 
       # test_case_removeEmpty_basic
@@ -229,9 +229,9 @@ test_case:
         values: [null, null, null, null, null, null, null]
 
       # test_case_excludedByTag_basic
-      - labels: "__name__:cpu,service:web,dc:dca1,test:excludedByTag"
+      - labels: "name:cpu,service:web,dc:dca1,test:excludedByTag"
         values: [1, 2, 3, null, null, null, null]
-      - labels: "__name__:cpu,service:api,dc:dca1,test:excludedByTag"
+      - labels: "name:cpu,service:api,dc:dca1,test:excludedByTag"
         values: [4, 5, 6, null, null, null, null]
 
       # test_case_timeshift_basic:
@@ -950,7 +950,8 @@ test_case:
       expected:
         status: "success"
         data:
-          - metric: {__name__: "My_CPU_Metric", dc: "dca1", test: "alias_basic"}
+          - metric: {name: "cpu_usage", dc: "dca1", test: "alias_basic"}
+            alias: "My_CPU_Metric"
             values: [1, 2, 3, 4]
 
     - name: "test_case_aliasByTags_basic"
@@ -964,7 +965,8 @@ test_case:
       expected:
         status: "success"
         data:
-          - metric: {__name__: "web dca1", service: "web", dc: "dca1", test: "aliasByTags_basic"}
+          - metric: {name: "requests", service: "web", dc: "dca1", test: "aliasByTags_basic"}
+            alias: "web dca1"
             values: [100, 200, 300]
 
     - name: "test_case_aliasByTags_single"
@@ -978,7 +980,8 @@ test_case:
       expected:
         status: "success"
         data:
-          - metric: {__name__: "payment", service: "payment", dc: "dca1", test: "aliasByTags_single"}
+          - metric: {name: "latency", service: "payment", dc: "dca1", test: "aliasByTags_single"}
+            alias: "payment"
             values: [50, 75, 60]
 
     - name: "test_case_showTags_basic"
@@ -992,7 +995,8 @@ test_case:
       expected:
         status: "success"
         data:
-          - metric: {__name__: "__name__:requests dc:dca1 env:prod service:web test:showTags_basic", service: "web", dc: "dca1", env: "prod", test: "showTags_basic"}
+          - metric: {name: "requests", service: "web", dc: "dca1", env: "prod", test: "showTags_basic"}
+            alias: "dc:dca1 env:prod name:requests service:web test:showTags_basic"
             values: [10, 20, 30]
 
     - name: "test_case_removeEmpty_basic"
@@ -1021,7 +1025,7 @@ test_case:
       expected:
         status: "success"
         data:
-          - metric: {__name__: "cpu", service: "web", dc: "dca1", test: "excludedByTag"}
+          - metric: {name: "cpu", service: "web", dc: "dca1", test: "excludedByTag"}
             values: [1, 2, 3]
 
     - name: "test_case_intersect_basic"
