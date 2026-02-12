@@ -9,8 +9,10 @@ package org.opensearch.tsdb.query.aggregator;
 
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.search.ScoreMode;
+import org.apache.lucene.util.RamUsageEstimator;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.message.ParameterizedMessage;
 import org.opensearch.core.common.breaker.CircuitBreakingException;
 import org.opensearch.search.aggregations.Aggregator;
 import org.opensearch.search.aggregations.AggregatorFactories;
@@ -48,6 +50,8 @@ import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
 import org.opensearch.tsdb.query.utils.ProfileInfoMapper;
+
+import static org.opensearch.tsdb.metrics.TSDBMetricsConstants.NANOS_PER_MILLI;
 
 /**
  * Aggregator that unfolds samples from chunks and applies linear pipeline stages.
@@ -118,118 +122,25 @@ public class TimeSeriesUnfoldAggregator extends BucketsAggregator {
     private final long step;
     private final long theoreticalMaxTimestamp; // Theoretical maximum aligned timestamp for time series
 
-    // Aggregator profiler debug info
-    private final DebugInfo debugInfo = new DebugInfo();
+    // Aggregator execution stats - single source of truth for all metrics
+    private final ExecutionStats executionStats = new ExecutionStats();
 
-    // Metrics tracking (using primitives for minimal overhead)
-    private long collectStartNanos = 0;
-    private long collectDurationNanos = 0;
-    private long postCollectStartNanos = 0;
-    private long postCollectDurationNanos = 0;
-    private int totalDocsProcessed = 0;
-    private int liveDocsProcessed = 0;
-    private int closedDocsProcessed = 0;
-    private int totalChunksProcessed = 0;
-    private int liveChunksProcessed = 0;
-    private int closedChunksProcessed = 0;
-    private int totalSamplesProcessed = 0;
-    private int liveSamplesProcessed = 0;
-    private int closedSamplesProcessed = 0;
-    private int chunksForDocErrors = 0;
-    private int outputSeriesCount = 0;
-
-    // Circuit breaker tracking
-    long circuitBreakerBytes = 0; // package-private for testing
-
-    // Estimated sizes for circuit breaker accounting
-    private static final long HASHMAP_ENTRY_OVERHEAD = 32; // Estimated overhead per HashMap entry
-    private static final long ARRAYLIST_OVERHEAD = 24; // Estimated ArrayList object overhead
+    // Batched circuit breaker bytes - accumulated locally before flushing to actual circuit breaker.
+    // This reduces the overhead of frequent circuit breaker calls during tight loops (e.g., group creation).
+    private long pendingCircuitBreakerBytes = 0;
 
     /**
-     * Set output series count for testing purposes.
-     * Package-private for testing.
+     * Total bytes committed to the circuit breaker by this aggregator.
+     * Used for logging (doClose, commitToCircuitBreaker), error reporting on trip, and metrics (passed to ExecutionStats at report time).
      */
-    void setOutputSeriesCountForTesting(int count) {
-        this.outputSeriesCount = count;
-    }
+    private long circuitBreakerBytes = 0;
 
     /**
-     * Expose addCircuitBreakerBytes for testing purposes.
-     * Package-private for testing.
+     * Circuit breaker batch threshold in bytes (5 MB).
+     * When tracking memory in tight loops (e.g., group creation), bytes are accumulated locally
+     * and only flushed to the circuit breaker when this threshold is exceeded.
      */
-    void addCircuitBreakerBytesForTesting(long bytes) {
-        addCircuitBreakerBytes(bytes);
-    }
-
-    /**
-     * Track memory allocation with circuit breaker.
-     * This method adds the specified bytes to the circuit breaker and tracks the total allocated.
-     * Logs warnings if allocation exceeds thresholds for observability.
-     *
-     * @param bytes the number of bytes to allocate
-     */
-    private void addCircuitBreakerBytes(long bytes) {
-        if (bytes > 0) {
-            try {
-                addRequestCircuitBreakerBytes(bytes);
-                circuitBreakerBytes += bytes;
-
-                // Log at DEBUG level for normal tracking
-                if (logger.isDebugEnabled()) {
-                    logger.debug(
-                        "Circuit breaker allocation: +{} bytes, total={} bytes, aggregator={}",
-                        bytes,
-                        circuitBreakerBytes,
-                        name()
-                    );
-                }
-
-            } catch (CircuitBreakingException e) {
-                // Try to get the original query source from SearchContext
-                String queryInfo = "unavailable";
-                try {
-                    if (context.request() != null && context.request().source() != null) {
-                        // Try to get the original OpenSearch DSL query
-                        queryInfo = context.request().source().toString();
-                    } else if (context.query() != null) {
-                        // Fallback to Lucene query representation
-                        queryInfo = context.query().toString();
-                    }
-                } catch (Exception ex) {
-                    // If we can't get the query source, use Lucene query as fallback
-                    queryInfo = context.query() != null ? context.query().toString() : "null";
-                }
-
-                // Log detailed information about the query that was killed
-                logger.error(
-                    "[request] Circuit breaker tripped: used [{}/{}mb] exceeds limit [{}/{}mb], "
-                        + "aggregation [{}]. "
-                        + "Attempted: {} bytes, Total by agg: {} bytes, "
-                        + "Time range: [{}-{}], Step: {}, Stages: {}. "
-                        + "Query: {}",
-                    e.getBytesWanted(),
-                    String.format(Locale.ROOT, "%.2f", e.getBytesWanted() / (1024.0 * 1024.0)),
-                    e.getByteLimit(),
-                    String.format(Locale.ROOT, "%.2f", e.getByteLimit() / (1024.0 * 1024.0)),
-                    name(),
-                    bytes,
-                    circuitBreakerBytes,
-                    minTimestamp,
-                    maxTimestamp,
-                    step,
-                    stages != null ? stages.size() : 0,
-                    queryInfo
-                );
-
-                // Increment circuit breaker trips counter
-                // Note: incrementCounter handles the isInitialized() check internally
-                TSDBMetrics.incrementCounter(TSDBMetrics.AGGREGATION.circuitBreakerTrips, 1);
-
-                // Re-throw the exception to fail the query
-                throw e;
-            }
-        }
-    }
+    private static final long CIRCUIT_BREAKER_BATCH_THRESHOLD = 5 * 1024 * 1024;
 
     /**
      * Create a time series unfold aggregator.
@@ -278,8 +189,8 @@ public class TimeSeriesUnfoldAggregator extends BucketsAggregator {
     @Override
     public LeafBucketCollector getLeafCollector(LeafReaderContext ctx, LeafBucketCollector sub) throws IOException {
         // Start timing collect phase
-        if (collectStartNanos == 0) {
-            collectStartNanos = System.nanoTime();
+        if (executionStats.collectStartNanos == 0) {
+            executionStats.collectStartNanos = System.nanoTime();
         }
 
         // Check if this leaf reader can be pruned based on time range
@@ -313,28 +224,24 @@ public class TimeSeriesUnfoldAggregator extends BucketsAggregator {
 
         @Override
         public void collect(int doc, long bucket) throws IOException {
-            // Accumulate all circuit breaker bytes for this document
-            // Single call at the end for better performance (avoid multiple atomic operations)
+            // Accumulate circuit breaker bytes for this document, then add to pending batch
             long bytesForThisDoc = 0;
 
             // Track document processing - determine if from live or closed index
             boolean isLiveReader = tsdbLeafReader instanceof LiveSeriesIndexLeafReader;
-            totalDocsProcessed++;
+            executionStats.totalDocCount++;
             if (isLiveReader) {
-                liveDocsProcessed++;
+                executionStats.liveDocCount++;
             } else {
-                closedDocsProcessed++;
+                executionStats.closedDocCount++;
             }
-
-            // FIXME: this is doc count, not chunk count
-            debugInfo.chunkCount++;
 
             // Use unified API to get chunks for this document
             List<ChunkIterator> chunkIterators;
             try {
                 chunkIterators = tsdbLeafReader.chunksForDoc(doc, tsdbDocValues);
             } catch (Exception e) {
-                chunksForDocErrors++;
+                executionStats.chunksForDocErrors++;
                 throw e;
             }
 
@@ -347,11 +254,11 @@ public class TimeSeriesUnfoldAggregator extends BucketsAggregator {
                     totalSampleCount += chunkSamples;
                 }
                 // Track chunks
-                totalChunksProcessed++;
+                executionStats.totalChunkCount++;
                 if (isLiveReader) {
-                    liveChunksProcessed++;
+                    executionStats.liveChunkCount++;
                 } else {
-                    closedChunksProcessed++;
+                    executionStats.closedChunkCount++;
                 }
             }
 
@@ -370,20 +277,18 @@ public class TimeSeriesUnfoldAggregator extends BucketsAggregator {
             ChunkIterator.DecodeResult decodeResult = it.decodeSamples(minTimestamp, maxTimestamp);
             SampleList allSamples = decodeResult.samples();
 
-            totalSamplesProcessed += decodeResult.processedSampleCount();
+            // Track samples with clear semantics:
+            // - *Processed: total samples decoded (includes out-of-range timestamps)
+            // - *PostFilter: samples after timestamp filtering (what survives)
+            executionStats.totalSamplesProcessed += decodeResult.processedSampleCount();
+            executionStats.totalSamplesPostFilter += allSamples.size();
             if (isLiveReader) {
-                liveSamplesProcessed += decodeResult.processedSampleCount();
-                debugInfo.liveDocCount++;
-                debugInfo.liveChunkCount += chunkIterators.size();
-                debugInfo.liveSampleCount += allSamples.size();
+                executionStats.liveSamplesProcessed += decodeResult.processedSampleCount();
+                executionStats.liveSamplesPostFilter += allSamples.size();
             } else {
-                closedSamplesProcessed += decodeResult.processedSampleCount();
-                debugInfo.closedDocCount++;
-                debugInfo.closedChunkCount += chunkIterators.size();
-                debugInfo.closedSampleCount += allSamples.size();
+                executionStats.closedSamplesProcessed += decodeResult.processedSampleCount();
+                executionStats.closedSamplesPostFilter += allSamples.size();
             }
-
-            debugInfo.sampleCount += allSamples.size();
 
             if (allSamples.isEmpty()) {
                 return;
@@ -394,7 +299,8 @@ public class TimeSeriesUnfoldAggregator extends BucketsAggregator {
             FloatSampleList.Builder alignedSamplesBuilder = new FloatSampleList.Builder(allSamples.size());
 
             // Accumulate circuit breaker bytes for aligned samples list
-            bytesForThisDoc += ARRAYLIST_OVERHEAD + (allSamples.size() * TimeSeries.ESTIMATED_SAMPLE_SIZE);
+            bytesForThisDoc += SampleList.ARRAYLIST_OVERHEAD + (allSamples.size() * TimeSeries.ESTIMATED_SAMPLE_SIZE);
+
             long lastAlignedTimestamp = Long.MIN_VALUE;
             for (Sample sample : allSamples) {
                 // Align timestamp to minTimestamp using floor (integer division)
@@ -426,7 +332,7 @@ public class TimeSeriesUnfoldAggregator extends BucketsAggregator {
 
             // Accumulate circuit breaker bytes for new bucket (if this is the first time series in this bucket)
             if (isNewBucket) {
-                bytesForThisDoc += ARRAYLIST_OVERHEAD + HASHMAP_ENTRY_OVERHEAD;
+                bytesForThisDoc += SampleList.ARRAYLIST_OVERHEAD + RamUsageEstimator.HASHTABLE_RAM_BYTES_PER_ENTRY;
             }
 
             // Find existing time series with same labels, or create new one
@@ -485,16 +391,16 @@ public class TimeSeriesUnfoldAggregator extends BucketsAggregator {
                 );
 
                 // Accumulate circuit breaker bytes for new time series
-                bytesForThisDoc += TimeSeries.ESTIMATED_MEMORY_OVERHEAD + labels.estimateBytes();
+                bytesForThisDoc += TimeSeries.ESTIMATED_MEMORY_OVERHEAD + labels.ramBytesUsed();
                 // Note: alignedSamples bytes already accumulated above
 
                 bucketSeries.add(newSeries);
             }
 
-            // Track circuit breaker - single call per document for better performance
-            if (bytesForThisDoc > 0) {
-                addCircuitBreakerBytes(bytesForThisDoc);
-            }
+            // Track circuit breaker bytes for this document
+            // Note: bytesForThisDoc is always > 0 here because we return early if allSamples is empty,
+            // and the aligned samples list always adds positive bytes when allSamples is non-empty
+            trackCircuitBreakerBytes(bytesForThisDoc);
 
             // TODO: maybe we need to move this
             collectBucket(subCollector, doc, bucket);
@@ -506,6 +412,12 @@ public class TimeSeriesUnfoldAggregator extends BucketsAggregator {
      * This method handles both normal stages and grouping stages appropriately.
      * It can be called with an empty list to handle cases where no data was collected.
      *
+     * <p>Circuit breaker tracking is performed at two levels:
+     * <ul>
+     *   <li>Stage-internal overhead: tracked via the circuit breaker bytes consumer passed to the executor</li>
+     *   <li>Output delta: tracked after each stage completes to account for output size changes</li>
+     * </ul>
+     *
      * @param timeSeries the input time series list (can be empty)
      * @return the processed time series list after applying all stages
      */
@@ -515,10 +427,15 @@ public class TimeSeriesUnfoldAggregator extends BucketsAggregator {
         if (stages != null && !stages.isEmpty()) {
             for (int i = 0; i < stages.size(); i++) {
                 UnaryPipelineStage stage = stages.get(i);
+
+                // Execute stage with circuit breaker tracking for internal allocations
+                // The executor will track stage-internal overhead (grouping maps, buffers, etc.)
+                // and output delta (if output is larger than input)
                 processedTimeSeries = PipelineStageExecutor.executeUnaryStage(
                     stage,
                     processedTimeSeries,
-                    false // shard-level execution
+                    false, // shard-level execution
+                    this::trackCircuitBreakerBytes // pass circuit breaker consumer for stage overhead tracking
                 );
             }
         }
@@ -528,11 +445,16 @@ public class TimeSeriesUnfoldAggregator extends BucketsAggregator {
 
     @Override
     public void postCollection() throws IOException {
+        // Flush pending bytes from collection phase before starting post-processing.
+        // This ensures accurate tracking before stage execution begins.
+        flushPendingCircuitBreakerBytes();
+
         // End collect phase timing and start postCollect timing
-        if (collectStartNanos > 0) {
-            collectDurationNanos = System.nanoTime() - collectStartNanos;
+        long currentTimestamp = System.nanoTime();
+        if (executionStats.collectStartNanos > 0) {
+            executionStats.collectDurationNanos = currentTimestamp - executionStats.collectStartNanos;
         }
-        postCollectStartNanos = System.nanoTime();
+        executionStats.postCollectStartNanos = currentTimestamp;
 
         try {
             // Process each bucket's time series
@@ -543,26 +465,36 @@ public class TimeSeriesUnfoldAggregator extends BucketsAggregator {
 
                 // Apply pipeline stages
                 List<TimeSeries> inputTimeSeries = entry.getValue();
-                debugInfo.inputSeriesCount += inputTimeSeries.size();
+                executionStats.inputSeriesCount += inputTimeSeries.size();
 
                 List<TimeSeries> processedTimeSeries = executeStages(inputTimeSeries);
 
                 // Track circuit breaker for processed time series storage
                 // Estimate the size of the processed time series list
-                long processedBytes = HASHMAP_ENTRY_OVERHEAD + ARRAYLIST_OVERHEAD;
+                long processedBytes = RamUsageEstimator.HASHTABLE_RAM_BYTES_PER_ENTRY + SampleList.ARRAYLIST_OVERHEAD;
                 for (TimeSeries ts : processedTimeSeries) {
-                    processedBytes += TimeSeries.ESTIMATED_MEMORY_OVERHEAD + ts.getLabels().estimateBytes();
+                    processedBytes += TimeSeries.ESTIMATED_MEMORY_OVERHEAD + ts.getLabels().ramBytesUsed();
                     processedBytes += ts.getSamples().size() * TimeSeries.ESTIMATED_SAMPLE_SIZE;
                 }
-                addCircuitBreakerBytes(processedBytes);
+                trackCircuitBreakerBytes(processedBytes);
 
                 // Store the processed time series
                 processedTimeSeriesByBucket.put(bucketOrd, processedTimeSeries);
             }
+
+            // Clear input map to allow GC of input data
+            // Note: The bytes tracked during collection phase remain tracked until aggregator closes.
+            // This is intentional - we're being conservative by not releasing until we're certain
+            // the data is no longer referenced. The aggregator's close() handles final cleanup.
+            timeSeriesByBucket.clear();
+
+            // Flush any pending bytes from post-processing before completing
+            flushPendingCircuitBreakerBytes();
+
             super.postCollection();
         } finally {
             // End postCollect timing
-            postCollectDurationNanos = System.nanoTime() - postCollectStartNanos;
+            executionStats.postCollectDurationNanos = System.nanoTime() - executionStats.postCollectStartNanos;
         }
     }
 
@@ -592,8 +524,7 @@ public class TimeSeriesUnfoldAggregator extends BucketsAggregator {
                     timeSeriesList = executeStages(List.of());
                 }
 
-                debugInfo.outputSeriesCount += timeSeriesList.size();
-                outputSeriesCount += timeSeriesList.size();
+                executionStats.outputSeriesCount += timeSeriesList.size();
 
                 // Get the last stage to determine the reduce behavior
                 UnaryPipelineStage lastStage = (stages == null || stages.isEmpty()) ? null : stages.getLast();
@@ -615,21 +546,24 @@ public class TimeSeriesUnfoldAggregator extends BucketsAggregator {
             }
             return results;
         } finally {
-            recordMetrics();
+            // Emit all metrics in one batch - minimal overhead
+            executionStats.recordMetrics();
         }
     }
 
     @Override
     public void doClose() {
+        // Flush any remaining pending circuit breaker bytes
+        flushPendingCircuitBreakerBytes();
+
         // Log circuit breaker summary before cleanup
-        if (logger.isDebugEnabled()) {
-            logger.debug(
-                "Closing aggregator '{}': total circuit breaker bytes tracked={} ({} KB)",
+        logger.debug(
+            () -> new ParameterizedMessage(
+                "Closing aggregator '{}': total circuit breaker bytes tracked={}",
                 name(),
-                circuitBreakerBytes,
-                circuitBreakerBytes / 1024
-            );
-        }
+                RamUsageEstimator.humanReadableUnits(circuitBreakerBytes)
+            )
+        );
 
         // Clear data structures - circuit breaker will be automatically released
         // by the parent AggregatorBase class when close() is called
@@ -637,120 +571,358 @@ public class TimeSeriesUnfoldAggregator extends BucketsAggregator {
         timeSeriesByBucket.clear();
     }
 
-    @Override
-    public void collectDebugInfo(BiConsumer<String, Object> add) {
-        super.collectDebugInfo(add);
-        debugInfo.add(add);
-        add.accept("stages", stages == null ? "" : stages.stream().map(UnaryPipelineStage::getName).collect(Collectors.joining(",")));
-        add.accept("circuit_breaker_bytes", circuitBreakerBytes);
+    // ==================== Circuit Breaker Tracking ====================
+
+    /**
+     * Flush pending bytes to the circuit breaker.
+     *
+     * <p>Commits any accumulated {@code pendingCircuitBreakerBytes} to the parent's
+     * circuit breaker via {@link #commitToCircuitBreaker(long)}. Resets pending bytes
+     * to 0 before calling commit to prevent double-flush if an exception occurs.</p>
+     */
+    private void flushPendingCircuitBreakerBytes() {
+        if (pendingCircuitBreakerBytes > 0) {
+            long bytesToFlush = pendingCircuitBreakerBytes;
+            pendingCircuitBreakerBytes = 0; // Reset before call to avoid double-flush on exception
+            commitToCircuitBreaker(bytesToFlush);
+        }
     }
 
     /**
-     * Emit all collected metrics in one batch for minimal overhead.
-     * All metrics are batched and emitted together at the end in a finally block.
-     * Package-private for testing.
+     * Track memory allocation or release with batching for efficiency.
+     *
+     * <p>Batches small allocations locally and only commits to the circuit breaker when the
+     * threshold ({@link #CIRCUIT_BREAKER_BATCH_THRESHOLD}) is exceeded.</p>
+     *
+     * <ul>
+     *   <li><b>Positive bytes (allocation):</b> Accumulated in {@code pendingCircuitBreakerBytes},
+     *       flushed when threshold exceeded</li>
+     *   <li><b>Negative bytes (release):</b> Pending bytes flushed first (for accurate peak tracking),
+     *       then release committed immediately</li>
+     * </ul>
+     *
+     * @param bytes the number of bytes to allocate (positive) or release (negative)
      */
-    void recordMetrics() {
-        if (!TSDBMetrics.isInitialized()) {
+    private void trackCircuitBreakerBytes(long bytes) {
+        if (bytes == 0) {
             return;
         }
 
-        try {
-            // Record latencies (convert nanos to millis only at emission time)
-            if (collectDurationNanos > 0) {
-                TSDBMetrics.recordHistogram(TSDBMetrics.AGGREGATION.collectLatency, collectDurationNanos / 1_000_000.0);
-            }
+        if (bytes > 0) {
+            // Allocation - batch for efficiency
+            pendingCircuitBreakerBytes += bytes;
 
-            if (postCollectDurationNanos > 0) {
-                TSDBMetrics.recordHistogram(TSDBMetrics.AGGREGATION.postCollectLatency, postCollectDurationNanos / 1_000_000.0);
+            // Flush when threshold exceeded
+            if (pendingCircuitBreakerBytes >= CIRCUIT_BREAKER_BATCH_THRESHOLD) {
+                flushPendingCircuitBreakerBytes();
             }
-
-            // Record document counts
-            if (totalDocsProcessed > 0) {
-                TSDBMetrics.recordHistogram(TSDBMetrics.AGGREGATION.docsTotal, totalDocsProcessed);
-            }
-            if (liveDocsProcessed > 0) {
-                TSDBMetrics.recordHistogram(TSDBMetrics.AGGREGATION.docsLive, liveDocsProcessed);
-            }
-            if (closedDocsProcessed > 0) {
-                TSDBMetrics.recordHistogram(TSDBMetrics.AGGREGATION.docsClosed, closedDocsProcessed);
-            }
-
-            // Record chunk counts
-            if (totalChunksProcessed > 0) {
-                TSDBMetrics.recordHistogram(TSDBMetrics.AGGREGATION.chunksTotal, totalChunksProcessed);
-            }
-            if (liveChunksProcessed > 0) {
-                TSDBMetrics.recordHistogram(TSDBMetrics.AGGREGATION.chunksLive, liveChunksProcessed);
-            }
-            if (closedChunksProcessed > 0) {
-                TSDBMetrics.recordHistogram(TSDBMetrics.AGGREGATION.chunksClosed, closedChunksProcessed);
-            }
-
-            // Record sample counts
-            if (totalSamplesProcessed > 0) {
-                TSDBMetrics.recordHistogram(TSDBMetrics.AGGREGATION.samplesTotal, totalSamplesProcessed);
-            }
-            if (liveSamplesProcessed > 0) {
-                TSDBMetrics.recordHistogram(TSDBMetrics.AGGREGATION.samplesLive, liveSamplesProcessed);
-            }
-            if (closedSamplesProcessed > 0) {
-                TSDBMetrics.recordHistogram(TSDBMetrics.AGGREGATION.samplesClosed, closedSamplesProcessed);
-            }
-
-            // Record errors
-            if (chunksForDocErrors > 0) {
-                TSDBMetrics.incrementCounter(TSDBMetrics.AGGREGATION.chunksForDocErrors, chunksForDocErrors);
-            }
-
-            // Record empty/hits metrics with tags
-            if (outputSeriesCount > 0) {
-                TSDBMetrics.incrementCounter(TSDBMetrics.AGGREGATION.resultsTotal, 1, TAGS_STATUS_HITS);
-                TSDBMetrics.recordHistogram(TSDBMetrics.AGGREGATION.seriesTotal, outputSeriesCount);
-            } else {
-                TSDBMetrics.incrementCounter(TSDBMetrics.AGGREGATION.resultsTotal, 1, TAGS_STATUS_EMPTY);
-            }
-
-            // Record circuit breaker MiB (histogram for distribution tracking)
-            if (circuitBreakerBytes > 0) {
-                TSDBMetrics.recordHistogram(TSDBMetrics.AGGREGATION.circuitBreakerMiB, circuitBreakerBytes / (1024.0 * 1024.0));
-            }
-        } catch (Exception e) {
-            // Swallow exceptions in metrics recording to avoid impacting actual operation
-            // Metrics failures should never break the application
+        } else {
+            // Release: flush pending allocations first to ensure accurate high-water mark tracking,
+            // then release immediately. Without this, pending +4MB and release -1MB would incorrectly
+            // net to +3MB, missing the actual peak allocation.
+            flushPendingCircuitBreakerBytes();
+            commitToCircuitBreaker(bytes);
         }
     }
 
-    // profiler debug info
-    private static class DebugInfo {
-        // total number of chunks collected (1 lucene doc = 1 chunk)
-        long chunkCount = 0;
-        // total samples collected
-        long sampleCount = 0;
-        // total number of unique series processed
-        long inputSeriesCount = 0;
-        // total number of series returned via InternalUnfold aggregation (if there is a reduce phase, it should be
-        // smaller than inputSeriesCount)
-        long outputSeriesCount = 0;
-        // the number of doc/chunk/sample in LiveSeriesIndex or in ClosedChunkIndex
-        long liveDocCount;
-        long liveChunkCount;
-        long liveSampleCount;
-        long closedDocCount;
-        long closedChunkCount;
-        long closedSampleCount;
+    /**
+     * Update aggregator's circuit breaker total and ExecutionStats max in one place.
+     * Call this whenever circuitBreakerBytes changes so the max (used for metrics) stays correct.
+     */
+    private void applyCircuitBreakerDelta(long delta) {
+        circuitBreakerBytes += delta;
+        executionStats.updateMaxCircuitBreakerBytes(circuitBreakerBytes);
+    }
 
+    /**
+     * Commit bytes directly to the parent's circuit breaker.
+     *
+     * <p>Calls {@link #addRequestCircuitBreakerBytes(long)} from the parent
+     * {@code AggregatorBase} class to update the circuit breaker.</p>
+     *
+     * @param bytes the number of bytes to allocate (positive) or release (negative)
+     */
+    private void commitToCircuitBreaker(long bytes) {
+        if (bytes > 0) {
+            // Allocation
+            try {
+                addRequestCircuitBreakerBytes(bytes);
+                applyCircuitBreakerDelta(bytes);
+
+                // Log at DEBUG level for normal tracking
+                logger.debug(
+                    () -> new ParameterizedMessage(
+                        "Circuit breaker allocation: +{} bytes, total={} bytes, aggregator={}",
+                        bytes,
+                        circuitBreakerBytes,
+                        name()
+                    )
+                );
+
+            } catch (CircuitBreakingException e) {
+                // Try to get the original query source from SearchContext
+                String queryInfo = "unavailable";
+                try {
+                    if (context.request() != null && context.request().source() != null) {
+                        // Try to get the original OpenSearch DSL query
+                        queryInfo = context.request().source().toString();
+                    } else if (context.query() != null) {
+                        // Fallback to Lucene query representation
+                        queryInfo = context.query().toString();
+                    }
+                } catch (Exception ex) {
+                    // If we can't get the query source, use Lucene query as fallback
+                    queryInfo = context.query() != null ? context.query().toString() : "null";
+                }
+
+                // Log detailed information about the query that was killed
+                logger.error(
+                    "[request] Circuit breaker tripped: used [{}/{}mb] exceeds limit [{}/{}mb], "
+                        + "aggregation [{}]. "
+                        + "Attempted: {} bytes, Total by agg: {} bytes, "
+                        + "Time range: [{}-{}], Step: {}, Stages: {}. "
+                        + "Query: {}",
+                    e.getBytesWanted(),
+                    String.format(Locale.ROOT, "%.2f", e.getBytesWanted() / (1024.0 * 1024.0)),
+                    e.getByteLimit(),
+                    String.format(Locale.ROOT, "%.2f", e.getByteLimit() / (1024.0 * 1024.0)),
+                    name(),
+                    bytes,
+                    circuitBreakerBytes,
+                    minTimestamp,
+                    maxTimestamp,
+                    step,
+                    stages != null ? stages.size() : 0,
+                    queryInfo
+                );
+
+                // Increment circuit breaker trips counter
+                // Note: incrementCounter handles the isInitialized() check internally
+                TSDBMetrics.incrementCounter(TSDBMetrics.AGGREGATION.circuitBreakerTrips, 1);
+
+                // Re-throw the exception to fail the query
+                throw e;
+            }
+        } else {
+            // Release (negative bytes) - release temporary overhead
+            // AggregatorBase.addRequestCircuitBreakerBytes uses addWithoutBreaking() for negative values
+            long bytesToRelease = -bytes;
+            addRequestCircuitBreakerBytes(bytes);
+            applyCircuitBreakerDelta(-bytesToRelease);
+
+            logger.debug(
+                () -> new ParameterizedMessage(
+                    "Circuit breaker release: -{} bytes, total={} bytes, aggregator={}",
+                    bytesToRelease,
+                    circuitBreakerBytes,
+                    name()
+                )
+            );
+        }
+    }
+
+    @Override
+    public void collectDebugInfo(BiConsumer<String, Object> add) {
+        super.collectDebugInfo(add);
+        executionStats.add(add);
+        add.accept("stages", stages == null ? "" : stages.stream().map(UnaryPipelineStage::getName).collect(Collectors.joining(",")));
+    }
+
+    /**
+     * Single source of truth for all aggregator metrics.
+     * Tracks timing, counts, and errors for both profiling (via collectDebugInfo) and
+     * telemetry (via recordMetrics).
+     */
+    private static class ExecutionStats {
+        // Timing metrics
+        long collectStartNanos = 0;
+        long collectDurationNanos = 0;
+        long postCollectStartNanos = 0;
+        long postCollectDurationNanos = 0;
+
+        // Document counts
+        long totalDocCount = 0;
+        long liveDocCount = 0;
+        long closedDocCount = 0;
+
+        // Chunk counts
+        long totalChunkCount = 0;
+        long liveChunkCount = 0;
+        long closedChunkCount = 0;
+
+        // Sample counts - "Processed" includes all decoded samples (even out-of-range)
+        long totalSamplesProcessed = 0;
+        long liveSamplesProcessed = 0;
+        long closedSamplesProcessed = 0;
+
+        // Sample counts - "PostFilter" includes only samples after timestamp filtering
+        long totalSamplesPostFilter = 0;
+        long liveSamplesPostFilter = 0;
+        long closedSamplesPostFilter = 0;
+
+        // Series counts
+        long inputSeriesCount = 0;
+        long outputSeriesCount = 0;
+
+        // Error counts
+        long chunksForDocErrors = 0;
+
+        /** Max circuit breaker bytes tracked across the lifecycle of the request (peak usage). Emitted as metric. */
+        long maxCircuitBreakerBytes = 0;
+
+        void updateMaxCircuitBreakerBytes(long currentBytes) {
+            this.maxCircuitBreakerBytes = Math.max(this.maxCircuitBreakerBytes, currentBytes);
+        }
+
+        /**
+         * Add debug info to profiler output.
+         * Uses maxCircuitBreakerBytes (kept up to date by aggregator when circuit breaker changes).
+         */
         void add(BiConsumer<String, Object> add) {
-            add.accept(ProfileInfoMapper.TOTAL_CHUNKS, chunkCount);
-            add.accept(ProfileInfoMapper.TOTAL_SAMPLES, sampleCount);
-            add.accept(ProfileInfoMapper.TOTAL_INPUT_SERIES, inputSeriesCount);
-            add.accept(ProfileInfoMapper.TOTAL_OUTPUT_SERIES, outputSeriesCount);
+            add.accept(ProfileInfoMapper.TOTAL_DOCS, totalDocCount);
             add.accept(ProfileInfoMapper.LIVE_DOC_COUNT, liveDocCount);
             add.accept(ProfileInfoMapper.CLOSED_DOC_COUNT, closedDocCount);
+            add.accept(ProfileInfoMapper.TOTAL_CHUNKS, totalChunkCount);
             add.accept(ProfileInfoMapper.LIVE_CHUNK_COUNT, liveChunkCount);
             add.accept(ProfileInfoMapper.CLOSED_CHUNK_COUNT, closedChunkCount);
-            add.accept(ProfileInfoMapper.LIVE_SAMPLE_COUNT, liveSampleCount);
-            add.accept(ProfileInfoMapper.CLOSED_SAMPLE_COUNT, closedSampleCount);
+            add.accept(ProfileInfoMapper.TOTAL_SAMPLES_PROCESSED, totalSamplesProcessed);
+            add.accept(ProfileInfoMapper.LIVE_SAMPLES_PROCESSED, liveSamplesProcessed);
+            add.accept(ProfileInfoMapper.CLOSED_SAMPLES_PROCESSED, closedSamplesProcessed);
+            add.accept(ProfileInfoMapper.TOTAL_SAMPLES_POST_FILTER, totalSamplesPostFilter);
+            add.accept(ProfileInfoMapper.LIVE_SAMPLES_POST_FILTER, liveSamplesPostFilter);
+            add.accept(ProfileInfoMapper.CLOSED_SAMPLES_POST_FILTER, closedSamplesPostFilter);
+            add.accept(ProfileInfoMapper.TOTAL_INPUT_SERIES, inputSeriesCount);
+            add.accept(ProfileInfoMapper.TOTAL_OUTPUT_SERIES, outputSeriesCount);
+            add.accept(ProfileInfoMapper.CIRCUIT_BREAKER_BYTES, maxCircuitBreakerBytes);
         }
+
+        /**
+         * Emit all collected metrics to TSDBMetrics in one batch for minimal overhead.
+         * All metrics are batched and emitted together at the end in a finally block.
+         * Uses maxCircuitBreakerBytes (kept up to date by aggregator when circuit breaker changes).
+         */
+        // TODO need to go through metrics and figure out if we want to emit metrics even when they are zero
+        void recordMetrics() {
+            if (!TSDBMetrics.isInitialized()) {
+                return;
+            }
+
+            try {
+                // Record latencies (convert nanos to millis only at emission time)
+                if (collectDurationNanos > 0) {
+                    TSDBMetrics.recordHistogram(TSDBMetrics.AGGREGATION.collectLatency, collectDurationNanos / NANOS_PER_MILLI);
+                }
+
+                if (postCollectDurationNanos > 0) {
+                    TSDBMetrics.recordHistogram(TSDBMetrics.AGGREGATION.postCollectLatency, postCollectDurationNanos / NANOS_PER_MILLI);
+                }
+
+                // Record document counts
+                if (totalDocCount > 0) {
+                    TSDBMetrics.recordHistogram(TSDBMetrics.AGGREGATION.docsTotal, totalDocCount);
+                }
+                if (liveDocCount > 0) {
+                    TSDBMetrics.recordHistogram(TSDBMetrics.AGGREGATION.docsLive, liveDocCount);
+                }
+                if (closedDocCount > 0) {
+                    TSDBMetrics.recordHistogram(TSDBMetrics.AGGREGATION.docsClosed, closedDocCount);
+                }
+
+                // Record chunk counts
+                if (totalChunkCount > 0) {
+                    TSDBMetrics.recordHistogram(TSDBMetrics.AGGREGATION.chunksTotal, totalChunkCount);
+                }
+                if (liveChunkCount > 0) {
+                    TSDBMetrics.recordHistogram(TSDBMetrics.AGGREGATION.chunksLive, liveChunkCount);
+                }
+                if (closedChunkCount > 0) {
+                    TSDBMetrics.recordHistogram(TSDBMetrics.AGGREGATION.chunksClosed, closedChunkCount);
+                }
+
+                // Record sample counts (use "processed" for telemetry - includes all decoded samples)
+                if (totalSamplesProcessed > 0) {
+                    TSDBMetrics.recordHistogram(TSDBMetrics.AGGREGATION.samplesTotal, totalSamplesProcessed);
+                }
+                if (liveSamplesProcessed > 0) {
+                    TSDBMetrics.recordHistogram(TSDBMetrics.AGGREGATION.samplesLive, liveSamplesProcessed);
+                }
+                if (closedSamplesProcessed > 0) {
+                    TSDBMetrics.recordHistogram(TSDBMetrics.AGGREGATION.samplesClosed, closedSamplesProcessed);
+                }
+
+                // TODO Record sample filtered?
+
+                // Record errors
+                if (chunksForDocErrors > 0) {
+                    TSDBMetrics.incrementCounter(TSDBMetrics.AGGREGATION.chunksForDocErrors, chunksForDocErrors);
+                }
+
+                // Record empty/hits metrics with tags
+                if (outputSeriesCount > 0) {
+                    TSDBMetrics.incrementCounter(TSDBMetrics.AGGREGATION.resultsTotal, 1, TAGS_STATUS_HITS);
+                    TSDBMetrics.recordHistogram(TSDBMetrics.AGGREGATION.seriesTotal, outputSeriesCount);
+                } else {
+                    TSDBMetrics.incrementCounter(TSDBMetrics.AGGREGATION.resultsTotal, 1, TAGS_STATUS_EMPTY);
+                }
+
+                // Record max circuit breaker bytes (peak usage over request lifecycle)
+                if (maxCircuitBreakerBytes > 0) {
+                    TSDBMetrics.recordHistogram(TSDBMetrics.AGGREGATION.circuitBreakerMiB, maxCircuitBreakerBytes / (1024.0 * 1024.0));
+                }
+            } catch (Exception e) {
+                // Swallow exceptions in metrics recording to avoid impacting actual operation
+                // Metrics failures should never break the application
+            }
+        }
+    }
+
+    // ==================== Test Helpers ====================
+
+    /**
+     * Set output series count for testing purposes.
+     * Package-private for testing.
+     */
+    void setOutputSeriesCountForTesting(int count) {
+        this.executionStats.outputSeriesCount = count;
+    }
+
+    /**
+     * Expose {@link #trackCircuitBreakerBytes(long)} for testing purposes.
+     * Package-private for testing.
+     */
+    void trackCircuitBreakerBytesForTesting(long bytes) {
+        trackCircuitBreakerBytes(bytes);
+    }
+
+    /**
+     * Flush pending circuit breaker bytes for testing purposes.
+     * Package-private for testing.
+     */
+    void flushPendingCircuitBreakerBytesForTesting() {
+        flushPendingCircuitBreakerBytes();
+    }
+
+    /**
+     * Call recordMetrics on execution stats for testing purposes.
+     * Package-private for testing.
+     */
+    void recordMetricsForTesting() {
+        executionStats.recordMetrics();
+    }
+
+    /**
+     * Add circuit breaker bytes for testing (delegates to {@link #trackCircuitBreakerBytesForTesting(long)}).
+     * Package-private for testing.
+     */
+    void addCircuitBreakerBytesForTesting(int bytes) {
+        trackCircuitBreakerBytesForTesting(bytes);
+    }
+
+    /**
+     * Get current circuit breaker bytes for testing.
+     * Package-private for testing.
+     */
+    long getCircuitBreakerBytesForTesting() {
+        return circuitBreakerBytes;
     }
 }
