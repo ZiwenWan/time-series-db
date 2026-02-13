@@ -834,21 +834,21 @@ public class SourceBuilderVisitor extends M3PlanVisitor<SourceBuilderVisitor.Com
      * @return true if eligible for streaming, false otherwise
      */
     private boolean isEligibleForStreamingAggregation(AggregationPlanNode planNode) {
-        // TODO: Temporarily disabled until proper index setting check is implemented
-        // The streaming aggregator setting check needs to be done at query build time
-        // when we have access to QueryShardContext and index settings
-        return false;
+        // Only eligible if streaming is enabled via query params
+        if (!params.streaming()) {
+            return false;
+        }
 
         // Only eligible if no previous stages (direct after fetch)
-        // if (!stageStack.isEmpty()) {
-        // return false;
-        // }
+        if (!stageStack.isEmpty()) {
+            return false;
+        }
 
         // Only support specific aggregation types
-        // return switch (planNode.getAggregationType()) {
-        // case AggregationType.SUM, AggregationType.AVG, AggregationType.MIN, AggregationType.MAX -> true;
-        // default -> false;
-        // };
+        return switch (planNode.getAggregationType()) {
+            case AggregationType.SUM, AggregationType.AVG, AggregationType.MIN, AggregationType.MAX -> true;
+            default -> false;
+        };
     }
 
     /**
