@@ -72,8 +72,8 @@ public class SemanticVersionComparator {
             trimmed = trimmed.substring(1);
         }
 
-        // Separate prerelease: find the first hyphen that is preceded by a digit
-        // This distinguishes "1.0.0-alpha" (prerelease) from "abc-def" (not a version)
+        // Separate prerelease: find the first hyphen that is preceded by a digit.
+        // Only one hyphen is allowed to avoid ambiguity (e.g., "1.2.3-1.2.3-abc" is rejected).
         String prerelease = null;
         for (int i = 1; i < trimmed.length(); i++) {
             if (trimmed.charAt(i) == '-' && Character.isDigit(trimmed.charAt(i - 1))) {
@@ -81,6 +81,9 @@ public class SemanticVersionComparator {
                 trimmed = trimmed.substring(0, i);
                 if (prerelease.isEmpty()) {
                     throw new IllegalArgumentException("Prerelease identifier cannot be empty in: " + version);
+                }
+                if (prerelease.contains("-")) {
+                    throw new IllegalArgumentException("Only one hyphen is allowed in version string: " + version);
                 }
                 break;
             }

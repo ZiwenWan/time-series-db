@@ -39,6 +39,15 @@ public class SemanticVersionComparatorTests extends OpenSearchTestCase {
         assertEquals("v1.0.0-0.3.7", SemanticVersionComparator.normalizeVersion("1.0.0-0.3.7"));
     }
 
+    public void testVersionNormalizationInvalidPrerelease() {
+        // Only one hyphen allowed in version string
+        assertThrows(IllegalArgumentException.class, () -> SemanticVersionComparator.normalizeVersion("1.2.3-1.2.3-abc"));
+        assertThrows(IllegalArgumentException.class, () -> SemanticVersionComparator.normalizeVersion("1.0.0-alpha-1"));
+        // Not detected as semver either
+        assertFalse(SemanticVersionComparator.isSemanticVersion("1.2.3-1.2.3-abc"));
+        assertFalse(SemanticVersionComparator.isSemanticVersion("1.0.0-alpha-1"));
+    }
+
     public void testVersionNormalizationInvalidInputs() {
         assertThrows(IllegalArgumentException.class, () -> SemanticVersionComparator.normalizeVersion(null));
         assertThrows(IllegalArgumentException.class, () -> SemanticVersionComparator.normalizeVersion(""));
