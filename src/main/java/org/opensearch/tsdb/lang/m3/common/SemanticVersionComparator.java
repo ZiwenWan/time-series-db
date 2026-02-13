@@ -8,12 +8,12 @@
 package org.opensearch.tsdb.lang.m3.common;
 
 import java.util.Locale;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Utility class for semantic version comparison and detection.
  * Provides flexible version normalization and comparison logic similar to Go's semver.Canonical.
+ * Supports versions in the format MAJOR.MINOR.PATCH with optional prerelease identifiers
+ * (e.g., "1.10.0-alpha", "1.0.0-alpha.1").
  */
 public class SemanticVersionComparator {
 
@@ -23,11 +23,6 @@ public class SemanticVersionComparator {
     private SemanticVersionComparator() {
         // Prevent instantiation
     }
-
-    /**
-     * Pattern to extract version components from normalized version string.
-     */
-    private static final Pattern VERSION_EXTRACT_PATTERN = Pattern.compile("^v(\\d+)\\.(\\d+)\\.(\\d+)(?:-(.*?))?(?:\\+(.*?))?$");
 
     /**
      * Determines if a string represents a semantic version using flexible detection.
@@ -51,12 +46,15 @@ public class SemanticVersionComparator {
 
     /**
      * Normalizes a version string using flexible rules similar to Go's semver.Canonical.
+     * Prerelease identifiers (after a hyphen) are preserved as-is.
      * Examples:
      * - "1" → "v1.0.0"
      * - "2.0" → "v2.0.0"
      * - "30.500" → "v30.500.0"
      * - "30.500.100" → "v30.500.100"
      * - "v1.2.3" → "v1.2.3" (already normalized)
+     * - "1.10.0-alpha" → "v1.10.0-alpha"
+     * - "1.0.0-alpha.1" → "v1.0.0-alpha.1"
      *
      * @param version the version string to normalize
      * @return the normalized version string with "v" prefix
@@ -74,6 +72,20 @@ public class SemanticVersionComparator {
             trimmed = trimmed.substring(1);
         }
 
+        // Separate prerelease: find the first hyphen that is preceded by a digit
+        // This distinguishes "1.0.0-alpha" (prerelease) from "abc-def" (not a version)
+        String prerelease = null;
+        for (int i = 1; i < trimmed.length(); i++) {
+            if (trimmed.charAt(i) == '-' && Character.isDigit(trimmed.charAt(i - 1))) {
+                prerelease = trimmed.substring(i + 1);
+                trimmed = trimmed.substring(0, i);
+                if (prerelease.isEmpty()) {
+                    throw new IllegalArgumentException("Prerelease identifier cannot be empty in: " + version);
+                }
+                break;
+            }
+        }
+
         // Split by dots and validate each component
         String[] parts = trimmed.split("\\.");
 
@@ -86,7 +98,11 @@ public class SemanticVersionComparator {
         int minor = parts.length > 1 ? parseVersionNumber(parts[1], "minor", version) : 0;
         int patch = parts.length > 2 ? parseVersionNumber(parts[2], "patch", version) : 0;
 
-        return String.format(Locale.ROOT, "v%d.%d.%d", major, minor, patch);
+        String normalized = String.format(Locale.ROOT, "v%d.%d.%d", major, minor, patch);
+        if (prerelease != null) {
+            normalized += "-" + prerelease;
+        }
+        return normalized;
     }
 
     /**
@@ -116,6 +132,16 @@ public class SemanticVersionComparator {
     /**
      * Compares two version strings using semantic version rules.
      * Both versions must be valid semantic versions.
+     * <p>
+     * Prerelease comparison follows the semver spec:
+     * <ul>
+     *   <li>A version without prerelease has higher precedence than one with prerelease
+     *       (e.g., 1.0.0 &gt; 1.0.0-alpha)</li>
+     *   <li>Prerelease identifiers are compared dot-separated, left to right</li>
+     *   <li>Numeric identifiers are compared as integers; string identifiers are compared lexicographically</li>
+     *   <li>Numeric identifiers have lower precedence than string identifiers</li>
+     *   <li>A shorter set of identifiers has lower precedence if all preceding identifiers are equal</li>
+     * </ul>
      *
      * @param version1 the first version to compare
      * @param version2 the second version to compare
@@ -123,81 +149,106 @@ public class SemanticVersionComparator {
      * @throws IllegalArgumentException if either version is not a valid semantic version
      */
     public static int compareSemanticVersions(String version1, String version2) {
-        if (!isSemanticVersion(version1)) {
-            throw new IllegalArgumentException("Invalid semantic version: " + version1);
-        }
-        if (!isSemanticVersion(version2)) {
-            throw new IllegalArgumentException("Invalid semantic version: " + version2);
-        }
-
         String normalized1 = normalizeVersion(version1);
         String normalized2 = normalizeVersion(version2);
 
-        VersionComponents v1 = extractVersionComponents(normalized1);
-        VersionComponents v2 = extractVersionComponents(normalized2);
+        // Split off prerelease
+        String base1 = normalized1;
+        String pre1 = null;
+        String base2 = normalized2;
+        String pre2 = null;
 
-        // Compare major version
-        int majorCompare = Integer.compare(v1.major, v2.major);
-        if (majorCompare != 0) {
-            return majorCompare;
+        int h1 = normalized1.indexOf('-');
+        if (h1 >= 0) {
+            base1 = normalized1.substring(0, h1);
+            pre1 = normalized1.substring(h1 + 1);
+        }
+        int h2 = normalized2.indexOf('-');
+        if (h2 >= 0) {
+            base2 = normalized2.substring(0, h2);
+            pre2 = normalized2.substring(h2 + 1);
         }
 
-        // Compare minor version
-        int minorCompare = Integer.compare(v1.minor, v2.minor);
-        if (minorCompare != 0) {
-            return minorCompare;
+        // Compare base version components (skip the 'v' prefix)
+        int[] v1 = parseBaseComponents(base1.substring(1));
+        int[] v2 = parseBaseComponents(base2.substring(1));
+
+        for (int i = 0; i < 3; i++) {
+            int cmp = Integer.compare(v1[i], v2[i]);
+            if (cmp != 0) {
+                return cmp;
+            }
         }
 
-        // Compare patch version
-        int patchCompare = Integer.compare(v1.patch, v2.patch);
-        if (patchCompare != 0) {
-            return patchCompare;
-        }
-
-        // Compare prerelease (if both have prerelease, compare lexicographically)
-        // Version without prerelease is greater than version with prerelease
-        if (v1.prerelease == null && v2.prerelease == null) {
+        // Base versions are equal — compare prerelease
+        if (pre1 == null && pre2 == null) {
             return 0;
-        } else if (v1.prerelease == null) {
-            return 1; // version1 > version2 (no prerelease > prerelease)
-        } else if (v2.prerelease == null) {
-            return -1; // version1 < version2 (prerelease < no prerelease)
+        } else if (pre1 == null) {
+            return 1; // release > prerelease
+        } else if (pre2 == null) {
+            return -1; // prerelease < release
         } else {
-            return v1.prerelease.compareTo(v2.prerelease);
+            return comparePrereleaseIdentifiers(pre1, pre2);
         }
     }
 
     /**
-     * Extracts version components from a normalized version string.
+     * Parses "MAJOR.MINOR.PATCH" (without 'v' prefix) into int[3].
      */
-    private static VersionComponents extractVersionComponents(String normalizedVersion) {
-        Matcher matcher = VERSION_EXTRACT_PATTERN.matcher(normalizedVersion);
-        if (!matcher.matches()) {
-            throw new IllegalArgumentException("Failed to parse normalized version: " + normalizedVersion);
-        }
-
-        int major = Integer.parseInt(matcher.group(1));
-        int minor = Integer.parseInt(matcher.group(2));
-        int patch = Integer.parseInt(matcher.group(3));
-        String prerelease = matcher.group(4); // can be null
-
-        return new VersionComponents(major, minor, patch, prerelease);
+    private static int[] parseBaseComponents(String base) {
+        String[] parts = base.split("\\.");
+        return new int[] { Integer.parseInt(parts[0]), Integer.parseInt(parts[1]), Integer.parseInt(parts[2]) };
     }
 
     /**
-     * Internal class to hold version components.
+     * Compares two prerelease strings per the semver spec.
+     * Identifiers are split by dots and compared left to right.
+     * Numeric identifiers are compared as integers; string identifiers are compared lexicographically.
+     * Numeric identifiers have lower precedence than string identifiers.
+     * A shorter set of identifiers has lower precedence if all preceding identifiers are equal.
      */
-    private static class VersionComponents {
-        final int major;
-        final int minor;
-        final int patch;
-        final String prerelease;
+    private static int comparePrereleaseIdentifiers(String pre1, String pre2) {
+        String[] ids1 = pre1.split("\\.");
+        String[] ids2 = pre2.split("\\.");
 
-        VersionComponents(int major, int minor, int patch, String prerelease) {
-            this.major = major;
-            this.minor = minor;
-            this.patch = patch;
-            this.prerelease = prerelease;
+        int len = Math.min(ids1.length, ids2.length);
+        for (int i = 0; i < len; i++) {
+            int cmp = compareSingleIdentifier(ids1[i], ids2[i]);
+            if (cmp != 0) {
+                return cmp;
+            }
+        }
+
+        // All compared identifiers are equal — shorter set has lower precedence
+        return Integer.compare(ids1.length, ids2.length);
+    }
+
+    /**
+     * Compares two individual prerelease identifiers.
+     * If both are numeric, compare as integers. If both are strings, compare lexicographically.
+     * Numeric identifiers have lower precedence than string identifiers.
+     */
+    private static int compareSingleIdentifier(String id1, String id2) {
+        boolean isNum1 = isNumeric(id1);
+        boolean isNum2 = isNumeric(id2);
+
+        if (isNum1 && isNum2) {
+            return Integer.compare(Integer.parseInt(id1), Integer.parseInt(id2));
+        } else if (isNum1) {
+            return -1; // numeric < string
+        } else if (isNum2) {
+            return 1; // string > numeric
+        } else {
+            return id1.compareTo(id2);
+        }
+    }
+
+    private static boolean isNumeric(String s) {
+        try {
+            Integer.parseInt(s);
+            return true;
+        } catch (NumberFormatException e) {
+            return false;
         }
     }
 }

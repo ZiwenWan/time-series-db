@@ -31,6 +31,14 @@ public class SemanticVersionComparatorTests extends OpenSearchTestCase {
         assertEquals("v0.0.1", SemanticVersionComparator.normalizeVersion("0.0.1"));
     }
 
+    public void testVersionNormalizationWithPrerelease() {
+        assertEquals("v1.10.0-alpha", SemanticVersionComparator.normalizeVersion("1.10.0-alpha"));
+        assertEquals("v1.0.0-alpha.1", SemanticVersionComparator.normalizeVersion("1.0.0-alpha.1"));
+        assertEquals("v1.2.3-beta", SemanticVersionComparator.normalizeVersion("v1.2.3-beta"));
+        assertEquals("v2.0.0-rc.1", SemanticVersionComparator.normalizeVersion("2.0.0-rc.1"));
+        assertEquals("v1.0.0-0.3.7", SemanticVersionComparator.normalizeVersion("1.0.0-0.3.7"));
+    }
+
     public void testVersionNormalizationInvalidInputs() {
         assertThrows(IllegalArgumentException.class, () -> SemanticVersionComparator.normalizeVersion(null));
         assertThrows(IllegalArgumentException.class, () -> SemanticVersionComparator.normalizeVersion(""));
@@ -38,6 +46,7 @@ public class SemanticVersionComparatorTests extends OpenSearchTestCase {
         assertThrows(IllegalArgumentException.class, () -> SemanticVersionComparator.normalizeVersion("abc"));
         assertThrows(IllegalArgumentException.class, () -> SemanticVersionComparator.normalizeVersion("1.2.3.4"));
         assertThrows(IllegalArgumentException.class, () -> SemanticVersionComparator.normalizeVersion("1.-1"));
+        assertThrows(IllegalArgumentException.class, () -> SemanticVersionComparator.normalizeVersion("1.0.0-"));
     }
 
     public void testSemanticVersionDetection() {
@@ -49,6 +58,11 @@ public class SemanticVersionComparatorTests extends OpenSearchTestCase {
         assertTrue(SemanticVersionComparator.isSemanticVersion("30.500.100"));
         assertTrue(SemanticVersionComparator.isSemanticVersion("29.5"));
         assertTrue(SemanticVersionComparator.isSemanticVersion("0.1.10"));
+
+        // Valid semantic versions with prerelease
+        assertTrue(SemanticVersionComparator.isSemanticVersion("1.0.0-alpha"));
+        assertTrue(SemanticVersionComparator.isSemanticVersion("1.10.0-alpha.1"));
+        assertTrue(SemanticVersionComparator.isSemanticVersion("v2.0.0-rc.1"));
 
         // Invalid semantic versions
         assertFalse(SemanticVersionComparator.isSemanticVersion(null));
@@ -97,5 +111,52 @@ public class SemanticVersionComparatorTests extends OpenSearchTestCase {
         assertTrue(SemanticVersionComparator.compareSemanticVersions("1.0.0", "2.0.0") < 0);
         assertTrue(SemanticVersionComparator.compareSemanticVersions("2.0.0", "1.0.0") > 0);
         assertEquals(0, SemanticVersionComparator.compareSemanticVersions("1.0.0", "1.0.0"));
+    }
+
+    // ========== Prerelease Comparison Tests ==========
+
+    public void testPrereleaseSameBaseDifferentPrerelease() {
+        // 1.10.0-alpha < 1.10.0-beta (alphabetically)
+        assertTrue(SemanticVersionComparator.compareSemanticVersions("1.10.0-alpha", "1.10.0-beta") < 0);
+        assertTrue(SemanticVersionComparator.compareSemanticVersions("1.10.0-beta", "1.10.0-alpha") > 0);
+    }
+
+    public void testPrereleaseVsRelease() {
+        // 1.10.0-alpha < 1.10.0 (prerelease is always less than release)
+        assertTrue(SemanticVersionComparator.compareSemanticVersions("1.10.0-alpha", "1.10.0") < 0);
+        assertTrue(SemanticVersionComparator.compareSemanticVersions("1.10.0", "1.10.0-alpha") > 0);
+    }
+
+    public void testPrereleaseNumericIdentifiers() {
+        // 1.10.0-alpha.1 < 1.10.0-alpha.2 (numeric identifiers compared as numbers)
+        assertTrue(SemanticVersionComparator.compareSemanticVersions("1.10.0-alpha.1", "1.10.0-alpha.2") < 0);
+        assertTrue(SemanticVersionComparator.compareSemanticVersions("1.10.0-alpha.2", "1.10.0-alpha.1") > 0);
+
+        // Numeric comparison, not string: 1.0.0-2 < 1.0.0-10 (as numbers, not strings)
+        assertTrue(SemanticVersionComparator.compareSemanticVersions("1.0.0-2", "1.0.0-10") < 0);
+    }
+
+    public void testPrereleaseEqualIdentifiers() {
+        assertEquals(0, SemanticVersionComparator.compareSemanticVersions("1.0.0-alpha", "1.0.0-alpha"));
+        assertEquals(0, SemanticVersionComparator.compareSemanticVersions("1.0.0-alpha.1", "1.0.0-alpha.1"));
+    }
+
+    public void testPrereleaseShorterSetLowerPrecedence() {
+        // 1.0.0-alpha < 1.0.0-alpha.1 (shorter set has lower precedence)
+        assertTrue(SemanticVersionComparator.compareSemanticVersions("1.0.0-alpha", "1.0.0-alpha.1") < 0);
+        assertTrue(SemanticVersionComparator.compareSemanticVersions("1.0.0-alpha.1", "1.0.0-alpha") > 0);
+    }
+
+    public void testPrereleaseNumericVsString() {
+        // Numeric identifiers have lower precedence than string identifiers
+        // 1.0.0-1 < 1.0.0-alpha (numeric < string)
+        assertTrue(SemanticVersionComparator.compareSemanticVersions("1.0.0-1", "1.0.0-alpha") < 0);
+        assertTrue(SemanticVersionComparator.compareSemanticVersions("1.0.0-alpha", "1.0.0-1") > 0);
+    }
+
+    public void testPrereleaseDifferentBaseVersions() {
+        // When base versions differ, prerelease is irrelevant
+        assertTrue(SemanticVersionComparator.compareSemanticVersions("1.0.0-alpha", "2.0.0-alpha") < 0);
+        assertTrue(SemanticVersionComparator.compareSemanticVersions("1.0.0-alpha", "1.1.0") < 0);
     }
 }
