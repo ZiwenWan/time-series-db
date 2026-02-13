@@ -227,7 +227,7 @@ public class LeafPruningBenchmark extends BaseTSDBBenchmark {
 
         SearchSourceBuilder searchSourceBuilder = M3OSTranslator.translate(
             m3Query,
-            new M3OSTranslator.Params(TimeUnit.MILLISECONDS, actualQueryStart, actualQueryEnd, 1000L, true, false, null)
+            new M3OSTranslator.Params(TimeUnit.MILLISECONDS, actualQueryStart, actualQueryEnd, 1000L, true, false, null, false)
         );
 
         QueryBuilder queryBuilder = searchSourceBuilder.query();

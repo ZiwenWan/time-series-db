@@ -60,9 +60,9 @@ import java.util.Objects;
  *     .step(1000L);
  * }</pre>
  *
- * <h2>Configuration Requirements:</h2>
- * <p>Requires {@code index.tsdb.streaming_aggregator.enable=true} to be enabled
- * for the target index, otherwise queries will fall back to the standard
+ * <h2>Configuration:</h2>
+ * <p>Streaming aggregation is enabled via the {@code streaming} query parameter.
+ * When enabled, eligible queries will use this builder instead of the standard
  * TimeSeriesUnfoldAggregator.</p>
  */
 public class TimeSeriesStreamingAggregationBuilder extends AbstractAggregationBuilder<TimeSeriesStreamingAggregationBuilder> {
@@ -186,14 +186,6 @@ public class TimeSeriesStreamingAggregationBuilder extends AbstractAggregationBu
             throw new IllegalStateException(
                 "Time Series Streaming Aggregator can only be used on indices where index.tsdb_engine.enabled is true"
             );
-        }
-
-        // Verify streaming aggregator is enabled on this index
-        boolean streamingEnabled = TSDBPlugin.TSDB_ENGINE_ENABLE_STREAMING_AGGREGATOR.get(
-            queryShardContext.getIndexSettings().getSettings()
-        );
-        if (!streamingEnabled) {
-            throw new IllegalStateException("Time Series Streaming Aggregator requires index.tsdb.streaming_aggregator.enable=true");
         }
 
         return new TimeSeriesStreamingAggregatorFactory(

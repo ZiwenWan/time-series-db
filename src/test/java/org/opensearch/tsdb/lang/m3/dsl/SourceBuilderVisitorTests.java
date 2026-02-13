@@ -96,7 +96,8 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
         10000L,   // step
         true,     // pushdown
         true,     // profile
-        null      // federationMetadata (no federation in tests)
+        null,     // federationMetadata (no federation in tests)
+        false     // streaming
     );
 
     private SourceBuilderVisitor visitor;
@@ -1066,7 +1067,7 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
         movingPlanNode.addChild(fetchPlanNode);
 
         SourceBuilderVisitor visitor = new SourceBuilderVisitor(
-            new M3OSTranslator.Params(Constants.Time.DEFAULT_TIME_UNIT, 1000000L, 2000000L, 10000L, false, false, null)
+            new M3OSTranslator.Params(Constants.Time.DEFAULT_TIME_UNIT, 1000000L, 2000000L, 10000L, false, false, null, false)
         );
 
         SourceBuilderVisitor.ComponentHolder results = visitor.visit(movingPlanNode);
@@ -1101,7 +1102,7 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
         movingPlanNode.addChild(fetchPlanNode);
 
         SourceBuilderVisitor visitor = new SourceBuilderVisitor(
-            new M3OSTranslator.Params(TimeUnit.SECONDS, 1000000L, 2000000L, 10000L, true, false, null)
+            new M3OSTranslator.Params(TimeUnit.SECONDS, 1000000L, 2000000L, 10000L, true, false, null, false)
         );
 
         SourceBuilderVisitor.ComponentHolder results = visitor.visit(movingPlanNode);
@@ -1179,7 +1180,8 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
             10000L,
             true,
             false,
-            federationMetadata
+            federationMetadata,
+            false
         );
 
         assertFalse(SourceBuilderVisitor.shouldDisablePushdown(params));
@@ -1202,7 +1204,8 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
             10000L,
             true,
             false,
-            federationMetadata
+            federationMetadata,
+            false
         );
 
         assertTrue(SourceBuilderVisitor.shouldDisablePushdown(params));
@@ -1434,7 +1437,8 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
             10000L,
             true, // pushdown enabled
             false,
-            null
+            null,
+            false
         );
         SourceBuilderVisitor visitor = new SourceBuilderVisitor(params);
 
@@ -1475,7 +1479,8 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
             10000L,
             false, // pushdown disabled
             false,
-            null
+            null,
+            false
         );
         SourceBuilderVisitor visitor = new SourceBuilderVisitor(params);
 
@@ -1521,7 +1526,8 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
             10000L,
             true, // pushdown enabled
             false,
-            federationMetadata
+            federationMetadata,
+            false
         );
         SourceBuilderVisitor visitor = new SourceBuilderVisitor(params);
 
@@ -1568,7 +1574,8 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
             10000L,
             true, // pushdown arg enabled
             false,
-            federationMetadata // but overlapping partitions override this
+            federationMetadata, // but overlapping partitions override this
+            false
         );
         SourceBuilderVisitor visitor = new SourceBuilderVisitor(params);
 
@@ -1614,7 +1621,8 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
             10000L,
             false, // pushdown disabled by arg
             false,
-            federationMetadata // partitions don't interfere
+            federationMetadata, // partitions don't interfere
+            false
         );
         SourceBuilderVisitor visitor = new SourceBuilderVisitor(params);
 
