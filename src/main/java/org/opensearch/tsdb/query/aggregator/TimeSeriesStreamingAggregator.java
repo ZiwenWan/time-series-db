@@ -22,7 +22,7 @@ import org.opensearch.search.internal.SearchContext;
 import org.opensearch.tsdb.core.chunk.ChunkIterator;
 import org.opensearch.tsdb.core.index.live.LiveSeriesIndexLeafReader;
 import org.opensearch.tsdb.core.model.ByteLabels;
-import org.opensearch.tsdb.core.model.FloatSample;
+import org.opensearch.tsdb.core.model.FloatSampleList;
 import org.opensearch.tsdb.core.model.Labels;
 import org.opensearch.tsdb.core.model.Sample;
 import org.opensearch.tsdb.core.model.SampleList;
@@ -302,28 +302,22 @@ public class TimeSeriesStreamingAggregator extends BucketsAggregator {
         }
 
         private void processChunk(ChunkIterator chunk) throws IOException {
-            // Merge and deduplicate if multiple chunks
-            List<Sample> samples = extractSamples(chunk);
+            SampleList samples = chunk.decodeSamples(this.minTimestamp, this.maxTimestamp).samples();
 
-            for (Sample sample : samples) {
+            for (int i = 0; i < samples.size(); i++) {
+                double value = samples.getValue(i);
                 // Skip NaN samples during collection
-                if (Double.isNaN(sample.getValue())) {
+                if (Double.isNaN(value)) {
                     continue;
                 }
 
                 // Calculate time index for direct array access
-                int timeIndex = calculateTimeIndex(sample.getTimestamp());
+                int timeIndex = calculateTimeIndex(samples.getTimestamp(i));
                 if (timeIndex >= 0 && timeIndex < values.length) {
-                    aggregateValue(timeIndex, sample.getValue());
+                    aggregateValue(timeIndex, value);
                     hasData = true;
                 }
             }
-        }
-
-        private List<Sample> extractSamples(ChunkIterator chunk) throws IOException {
-            // Handle single chunk case directly
-            List<Sample> samples = chunk.decodeSamples(this.minTimestamp, this.maxTimestamp).samples();
-            return samples;
         }
 
         private int calculateTimeIndex(long timestamp) {
@@ -354,28 +348,47 @@ public class TimeSeriesStreamingAggregator extends BucketsAggregator {
                 return Collections.emptyList();
             }
 
-            List<Sample> resultSamples = new ArrayList<>();
+            // For AVG with SumCountSample, we need to use SampleList.fromList since SumCountSample
+            // is not a simple float sample. For other types, use FloatSampleList.Builder.
+            if (aggregationType == StreamingAggregationType.AVG) {
+                List<Sample> resultSamples = new ArrayList<>();
+                for (int i = 0; i < values.length; i++) {
+                    if (!Double.isNaN(values[i]) && counts[i] > 0) {
+                        long timestamp = minTimestamp + (i * step);
+                        resultSamples.add(new SumCountSample(timestamp, values[i], counts[i]));
+                    }
+                }
 
+                if (resultSamples.isEmpty()) {
+                    return Collections.emptyList();
+                }
+
+                SampleList sampleList = SampleList.fromList(resultSamples);
+                TimeSeries timeSeries = new TimeSeries(
+                    sampleList,
+                    ByteLabels.emptyLabels(),
+                    this.minTimestamp,
+                    this.maxTimestamp,
+                    this.step,
+                    null
+                );
+                return Collections.singletonList(timeSeries);
+            }
+
+            FloatSampleList.Builder builder = new FloatSampleList.Builder(values.length);
             for (int i = 0; i < values.length; i++) {
                 if (!Double.isNaN(values[i])) {
                     long timestamp = minTimestamp + (i * step);
-                    double value = values[i];
-
-                    if (aggregationType == StreamingAggregationType.AVG && counts[i] > 0) {
-                        value = value / counts[i]; // Calculate average
-                        resultSamples.add(new SumCountSample(timestamp, values[i], counts[i]));
-                    } else {
-                        resultSamples.add(new FloatSample(timestamp, value));
-                    }
+                    builder.add(timestamp, values[i]);
                 }
             }
 
-            if (resultSamples.isEmpty()) {
+            if (builder.isEmpty()) {
                 return Collections.emptyList();
             }
 
             // Create single TimeSeries with empty labels (global aggregation)
-            SampleList sampleList = SampleList.fromList(resultSamples);
+            SampleList sampleList = builder.build();
             TimeSeries timeSeries = new TimeSeries(
                 sampleList,
                 ByteLabels.emptyLabels(), // Empty labels for global aggregation
@@ -462,16 +475,17 @@ public class TimeSeriesStreamingAggregator extends BucketsAggregator {
         }
 
         private void processChunkForGroup(ChunkIterator chunk, GroupTimeArrays arrays) throws IOException {
-            List<Sample> samples = chunk.decodeSamples(this.minTimestamp, this.maxTimestamp).samples();
+            SampleList samples = chunk.decodeSamples(this.minTimestamp, this.maxTimestamp).samples();
 
-            for (Sample sample : samples) {
-                if (Double.isNaN(sample.getValue())) {
+            for (int i = 0; i < samples.size(); i++) {
+                double value = samples.getValue(i);
+                if (Double.isNaN(value)) {
                     continue;
                 }
 
-                int timeIndex = (int) ((sample.getTimestamp() - minTimestamp) / step);
+                int timeIndex = (int) ((samples.getTimestamp(i) - minTimestamp) / step);
                 if (timeIndex >= 0 && timeIndex < timeArraySize) {
-                    arrays.aggregate(timeIndex, sample.getValue(), aggregationType);
+                    arrays.aggregate(timeIndex, value, aggregationType);
                 }
             }
         }
@@ -484,9 +498,8 @@ public class TimeSeriesStreamingAggregator extends BucketsAggregator {
                 ByteLabels groupLabels = entry.getKey();
                 GroupTimeArrays arrays = entry.getValue();
 
-                List<Sample> resultSamples = arrays.createSamples(minTimestamp, step, aggregationType);
-                if (!resultSamples.isEmpty()) {
-                    SampleList sampleList = SampleList.fromList(resultSamples);
+                SampleList sampleList = arrays.createSampleList(minTimestamp, step, aggregationType);
+                if (!sampleList.isEmpty()) {
                     TimeSeries timeSeries = new TimeSeries(
                         sampleList,
                         groupLabels,
@@ -550,24 +563,31 @@ public class TimeSeriesStreamingAggregator extends BucketsAggregator {
             hasData = true;
         }
 
-        public List<Sample> createSamples(long minTimestamp, long step, StreamingAggregationType type) {
+        public SampleList createSampleList(long minTimestamp, long step, StreamingAggregationType type) {
             if (!hasData) {
-                return Collections.emptyList();
+                return SampleList.fromList(Collections.emptyList());
             }
 
-            List<Sample> samples = new ArrayList<>();
+            // AVG uses SumCountSample, which is not a simple float sample
+            if (type == StreamingAggregationType.AVG) {
+                List<Sample> samples = new ArrayList<>();
+                for (int i = 0; i < values.length; i++) {
+                    if (!Double.isNaN(values[i]) && counts[i] > 0) {
+                        long timestamp = minTimestamp + (i * step);
+                        samples.add(new SumCountSample(timestamp, values[i], counts[i]));
+                    }
+                }
+                return SampleList.fromList(samples);
+            }
+
+            FloatSampleList.Builder builder = new FloatSampleList.Builder(values.length);
             for (int i = 0; i < values.length; i++) {
                 if (!Double.isNaN(values[i])) {
                     long timestamp = minTimestamp + (i * step);
-
-                    if (type == StreamingAggregationType.AVG && counts[i] > 0) {
-                        samples.add(new SumCountSample(timestamp, values[i], counts[i]));
-                    } else {
-                        samples.add(new FloatSample(timestamp, values[i]));
-                    }
+                    builder.add(timestamp, values[i]);
                 }
             }
-            return samples;
+            return builder.build();
         }
 
         public long getEstimatedMemoryUsage() {
