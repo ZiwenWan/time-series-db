@@ -11,6 +11,7 @@ import org.opensearch.action.search.SearchRequest;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.tsdb.framework.models.QueryConfig;
 import org.opensearch.tsdb.framework.models.TimeConfig;
+import org.opensearch.tsdb.core.utils.Constants;
 import org.opensearch.tsdb.lang.m3.dsl.M3OSTranslator;
 
 import java.time.Instant;
@@ -41,14 +42,19 @@ public class M3QLTranslator implements QueryConfigTranslator {
         // Get pushdown setting from query config (default is pushdown enabled, so disablePushdown=false means pushdown=true)
         boolean pushdown = !queryConfig.isDisablePushdown();
 
+        // Get streaming setting from query config (default is disabled)
+        boolean streaming = queryConfig.isStreaming();
+
         // Create M3OSTranslator parameters (no federation metadata for tests)
         M3OSTranslator.Params params = new M3OSTranslator.Params(
+            Constants.Time.DEFAULT_TIME_UNIT,
             minTime.toEpochMilli(),
             maxTime.toEpochMilli(),
             step,
             pushdown,
             false,
-            null  // federationMetadata
+            null,     // federationMetadata
+            streaming
         );
 
         // Translate M3QL query string to SearchSourceBuilder
