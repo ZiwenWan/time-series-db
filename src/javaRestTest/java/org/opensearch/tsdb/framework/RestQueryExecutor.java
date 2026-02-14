@@ -137,6 +137,11 @@ public class RestQueryExecutor extends BaseQueryExecutor {
             url = url + "&pushdown=false";
         }
 
+        // Add streaming parameter if enabled in query config
+        if (queryConfig.isStreaming()) {
+            url = url + "&streaming=true";
+        }
+
         Request request = new Request(RestRequest.Method.POST.name(), url);
 
         try (XContentBuilder builder = XContentFactory.jsonBuilder()) {

@@ -42,13 +42,15 @@ import org.opensearch.tsdb.query.rest.ResolvedPartitions;
  * @param config Time configuration
  * @param indices Target indices (comma-separated, may include cluster prefixes)
  * @param disablePushdown Optional flag to disable query pushdown
+ * @param streaming Optional flag to enable streaming aggregation
  * @param ccsMinimizeRoundtrips Optional CCS minimize roundtrips setting (default: true)
  * @param resolvedPartitions Optional pre-resolved partitions
  * @param expected Expected response for validation
  */
 public record QueryConfig(@JsonProperty("name") String name, @JsonProperty("type") QueryType type, @JsonProperty("query") String query,
     @JsonProperty("time_config") TimeConfig config, @JsonProperty("indices") String indices,
-    @JsonProperty("disable_pushdown") Boolean disablePushdown, @JsonProperty("ccs_minimize_roundtrips") Boolean ccsMinimizeRoundtrips,
+    @JsonProperty("disable_pushdown") Boolean disablePushdown, @JsonProperty("streaming") Boolean streaming,
+    @JsonProperty("ccs_minimize_roundtrips") Boolean ccsMinimizeRoundtrips,
     @JsonProperty("resolved_partitions") @JsonDeserialize(using = ResolvedPartitionsYamlAdapter.Deserializer.class) ResolvedPartitions resolvedPartitions,
     @JsonProperty("expected") ExpectedResponse expected) {
 
@@ -57,6 +59,13 @@ public record QueryConfig(@JsonProperty("name") String name, @JsonProperty("type
      */
     public boolean isDisablePushdown() {
         return disablePushdown != null && disablePushdown;
+    }
+
+    /**
+     * Get the streaming flag, defaulting to false if not specified.
+     */
+    public boolean isStreaming() {
+        return streaming != null && streaming;
     }
 
     /**

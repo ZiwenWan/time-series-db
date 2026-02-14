@@ -353,7 +353,8 @@ public class TimeSeriesStreamingAggregationBuilder extends AbstractAggregationBu
      * This method is called during plugin initialization to register the aggregation.
      */
     public static void registerAggregators(ValuesSourceRegistry.Builder builder) {
-        // No values source registry required for this aggregation type
-        // Streaming aggregator works directly with document chunks
+        // Register usage for the aggregation since we don't use ValuesSourceRegistry
+        // but still need to be registered for usage tracking
+        builder.registerUsage(NAME);
     }
 }

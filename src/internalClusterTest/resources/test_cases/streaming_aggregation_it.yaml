@@ -1,0 +1,119 @@
+# Streaming Aggregation Integration Test
+# Validates that streaming aggregation produces identical results to unfold aggregation
+# for eligible queries (fetch | sum/min/max/avg)
+
+test_setup:
+  name: "Streaming Aggregation Integration Test"
+  description: "Tests streaming aggregation correctness for sum, min, max, avg"
+
+  index_configs:
+    - name: "streaming_agg_test"
+      shards: 1
+      replicas: 0
+
+test_case:
+  name: "Streaming Aggregation Correctness"
+
+  input_data_list:
+    - index_name: "streaming_agg_test"
+      input_data_type: FIXED_INTERVAL
+      time_config:
+        min_timestamp: "now-50m"
+        max_timestamp: "now-10m"
+        step: "10m"
+      regular_metrics:
+      # Service A - region us-east
+      - labels: "__name__:request_count,service:api,region:us-east"
+        values: [100, 200, 150, 180, 120]
+
+      # Service A - region us-west
+      - labels: "__name__:request_count,service:api,region:us-west"
+        values: [50, 80, 60, 70, 90]
+
+      # Service B - region us-east
+      - labels: "__name__:request_count,service:web,region:us-east"
+        values: [300, 250, 280, 310, 290]
+
+      # Service B - region us-west
+      - labels: "__name__:request_count,service:web,region:us-west"
+        values: [null, 150, 140, 160, 130]
+
+  queries:
+    # ==================== Streaming sum ====================
+    - name: "streaming_sum_global"
+      type: "m3ql"
+      query: "fetch __name__:request_count | sum"
+      indices: "streaming_agg_test"
+      streaming: true
+      time_config:
+        min_timestamp: "now-50m"
+        max_timestamp: "now"
+        step: "10m"
+      expected:
+        status: "success"
+        data:
+          - metric: {}
+            values: [450, 680, 630, 720, 630]
+
+    # Verify same result without streaming
+    - name: "unfold_sum_global"
+      type: "m3ql"
+      query: "fetch __name__:request_count | sum"
+      indices: "streaming_agg_test"
+      time_config:
+        min_timestamp: "now-50m"
+        max_timestamp: "now"
+        step: "10m"
+      expected:
+        status: "success"
+        data:
+          - metric: {}
+            values: [450, 680, 630, 720, 630]
+
+    # ==================== Streaming min ====================
+    - name: "streaming_min_global"
+      type: "m3ql"
+      query: "fetch __name__:request_count | min"
+      indices: "streaming_agg_test"
+      streaming: true
+      time_config:
+        min_timestamp: "now-50m"
+        max_timestamp: "now"
+        step: "10m"
+      expected:
+        status: "success"
+        data:
+          - metric: {}
+            values: [50, 80, 60, 70, 90]
+
+    # ==================== Streaming max ====================
+    - name: "streaming_max_global"
+      type: "m3ql"
+      query: "fetch __name__:request_count | max"
+      indices: "streaming_agg_test"
+      streaming: true
+      time_config:
+        min_timestamp: "now-50m"
+        max_timestamp: "now"
+        step: "10m"
+      expected:
+        status: "success"
+        data:
+          - metric: {}
+            values: [300, 250, 280, 310, 290]
+
+    # ==================== Streaming avg ====================
+    - name: "streaming_avg_global"
+      type: "m3ql"
+      query: "fetch __name__:request_count | avg"
+      indices: "streaming_agg_test"
+      streaming: true
+      time_config:
+        min_timestamp: "now-50m"
+        max_timestamp: "now"
+        step: "10m"
+      expected:
+        status: "success"
+        data:
+          - metric: {}
+            values: [150, 170, 157.5, 180, 157.5]
