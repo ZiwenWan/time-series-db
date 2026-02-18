@@ -353,6 +353,21 @@ test_case:
           - metric: {}
             values: [5, 7, 9]
 
+    - name: "test_case_sum_basic_streaming"
+      type: "m3ql"
+      indices: "golden_all"
+      query: "fetch test:sum_basic | sum"
+      streaming: true
+      time_config:
+        min_timestamp: "2025-01-01T00:00:00Z"
+        max_timestamp: "2025-01-01T00:03:00Z"
+        step: "1m"
+      expected:
+        status: "success"
+        data:
+          - metric: {}
+            values: [5, 7, 9]
+
     - name: "test_case_sum_by_tag"
       type: "m3ql"
       indices: "golden_all"
@@ -369,10 +384,42 @@ test_case:
           - metric: {dc: "phx1"}
             values: [15, 25, 35]
 
+    - name: "test_case_sum_by_tag_streaming"
+      type: "m3ql"
+      indices: "golden_all"
+      query: "fetch test:sum_by_tag | sum dc"
+      streaming: true
+      time_config:
+        min_timestamp: "2025-01-01T00:00:00Z"
+        max_timestamp: "2025-01-01T00:03:00Z"
+        step: "1m"
+      expected:
+        status: "success"
+        data:
+          - metric: {dc: "dca1"}
+            values: [10, 20, 30]
+          - metric: {dc: "phx1"}
+            values: [15, 25, 35]
+
     - name: "test_case_avg_basic"
       type: "m3ql"
       indices: "golden_all"
       query: "fetch test:avg_basic | avg service"
+      time_config:
+        min_timestamp: "2025-01-01T00:00:00Z"
+        max_timestamp: "2025-01-01T00:03:00Z"
+        step: "1m"
+      expected:
+        status: "success"
+        data:
+          - metric: {service: "web"}
+            values: [15, 25, 35]
+
+    - name: "test_case_avg_basic_streaming"
+      type: "m3ql"
+      indices: "golden_all"
+      query: "fetch test:avg_basic | avg service"
+      streaming: true
       time_config:
         min_timestamp: "2025-01-01T00:00:00Z"
         max_timestamp: "2025-01-01T00:03:00Z"
@@ -411,10 +458,40 @@ test_case:
           - metric: {name: "cpu"}
             values: [8, 15, 10]
 
+    - name: "test_case_max_basic_streaming"
+      type: "m3ql"
+      indices: "golden_all"
+      query: "fetch test:max_basic | max name"
+      streaming: true
+      time_config:
+        min_timestamp: "2025-01-01T00:00:00Z"
+        max_timestamp: "2025-01-01T00:03:00Z"
+        step: "1m"
+      expected:
+        status: "success"
+        data:
+          - metric: {name: "cpu"}
+            values: [8, 15, 10]
+
     - name: "test_case_min_basic"
       type: "m3ql"
       indices: "golden_all"
       query: "fetch test:min_basic | min name"
+      time_config:
+        min_timestamp: "2025-01-01T00:00:00Z"
+        max_timestamp: "2025-01-01T00:03:00Z"
+        step: "1m"
+      expected:
+        status: "success"
+        data:
+          - metric: {name: "latency"}
+            values: [5, 12, 6]
+
+    - name: "test_case_min_basic_streaming"
+      type: "m3ql"
+      indices: "golden_all"
+      query: "fetch test:min_basic | min name"
+      streaming: true
       time_config:
         min_timestamp: "2025-01-01T00:00:00Z"
         max_timestamp: "2025-01-01T00:03:00Z"
@@ -485,6 +562,23 @@ test_case:
       type: "m3ql"
       indices: "golden_all"
       query: "fetch test:sum_multi | sum dc"
+      time_config:
+        min_timestamp: "2025-01-01T00:00:00Z"
+        max_timestamp: "2025-01-01T00:03:00Z"
+        step: "1m"
+      expected:
+        status: "success"
+        data:
+          - metric: {dc: "dca1"}
+            values: [180, 380, 270]
+          - metric: {dc: "phx1"}
+            values: [210, 410, 300]
+
+    - name: "test_case_sum_multi_datacenter_streaming"
+      type: "m3ql"
+      indices: "golden_all"
+      query: "fetch test:sum_multi | sum dc"
+      streaming: true
       time_config:
         min_timestamp: "2025-01-01T00:00:00Z"
         max_timestamp: "2025-01-01T00:03:00Z"

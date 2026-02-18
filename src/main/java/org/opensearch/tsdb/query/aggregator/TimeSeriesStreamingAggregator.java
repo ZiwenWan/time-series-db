@@ -31,6 +31,12 @@ import org.opensearch.tsdb.core.reader.TSDBDocValues;
 import org.opensearch.tsdb.core.reader.TSDBLeafReader;
 import org.opensearch.tsdb.metrics.TSDBMetrics;
 
+import org.opensearch.tsdb.lang.m3.stage.AvgStage;
+import org.opensearch.tsdb.lang.m3.stage.MaxStage;
+import org.opensearch.tsdb.lang.m3.stage.MinStage;
+import org.opensearch.tsdb.lang.m3.stage.SumStage;
+import org.opensearch.tsdb.query.stage.UnaryPipelineStage;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -173,16 +179,40 @@ public class TimeSeriesStreamingAggregator extends BucketsAggregator {
     public InternalAggregation[] buildAggregations(long[] bucketOrds) throws IOException {
         InternalAggregation[] results = new InternalAggregation[bucketOrds.length];
 
+        // Create the reduce stage that matches our streaming aggregation type,
+        // so that cross-shard reduction properly re-aggregates partial results.
+        UnaryPipelineStage reduceStage = createReduceStage();
+
         for (int i = 0; i < bucketOrds.length; i++) {
             long bucketOrd = bucketOrds[i];
             StreamingAggregationState state = bucketStates.get(bucketOrd);
 
             List<TimeSeries> timeSeries = state != null ? state.getFinalResults(minTimestamp, maxTimestamp, step) : Collections.emptyList();
 
-            results[i] = new InternalTimeSeries(name, timeSeries, metadata());
+            results[i] = new InternalTimeSeries(name, timeSeries, metadata(), reduceStage);
         }
 
         return results;
+    }
+
+    /**
+     * Create the pipeline stage that corresponds to this streaming aggregation type.
+     * This stage is used during cross-shard reduce to properly combine partial results.
+     */
+    private UnaryPipelineStage createReduceStage() {
+        List<String> tags = (groupByTags != null) ? groupByTags : Collections.emptyList();
+        switch (aggregationType) {
+            case SUM:
+                return tags.isEmpty() ? new SumStage() : new SumStage(tags);
+            case MIN:
+                return tags.isEmpty() ? new MinStage() : new MinStage(tags);
+            case MAX:
+                return tags.isEmpty() ? new MaxStage() : new MaxStage(tags);
+            case AVG:
+                return tags.isEmpty() ? new AvgStage() : new AvgStage(tags);
+            default:
+                throw new IllegalStateException("Unknown streaming aggregation type: " + aggregationType);
+        }
     }
 
     @Override
@@ -469,9 +499,20 @@ public class TimeSeriesStreamingAggregator extends BucketsAggregator {
         }
 
         private ByteLabels extractGroupLabels(Labels allLabels) {
-            // TODO: Extract only the specified group-by labels from allLabels
-            // For now, simplified implementation
-            return ByteLabels.emptyLabels();
+            if (groupByTags.isEmpty()) {
+                return ByteLabels.emptyLabels();
+            }
+
+            Map<String, String> groupLabelMap = new HashMap<>();
+            for (String tagName : groupByTags) {
+                if (allLabels != null && allLabels.has(tagName)) {
+                    groupLabelMap.put(tagName, allLabels.get(tagName));
+                } else {
+                    return null;
+                }
+            }
+
+            return ByteLabels.fromMap(groupLabelMap);
         }
 
         private void processChunkForGroup(ChunkIterator chunk, GroupTimeArrays arrays) throws IOException {
