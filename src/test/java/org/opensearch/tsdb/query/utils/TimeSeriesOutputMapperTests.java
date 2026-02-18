@@ -107,7 +107,11 @@ public class TimeSeriesOutputMapperTests extends OpenSearchTestCase {
         Map<String, String> metric = (Map<String, String>) result.get("metric");
         assertThat(metric, hasEntry("region", "us-east"));
         assertThat(metric, hasEntry("service", "api"));
-        assertThat(metric, hasEntry("__name__", "my_metric"));
+        assertFalse(metric.containsKey("__name__"));
+        assertEquals(2, metric.size());
+
+        // Verify alias is a separate field
+        assertThat(result.get("alias"), equalTo("my_metric"));
 
         @SuppressWarnings("unchecked")
         List<List<Object>> values = (List<List<Object>>) result.get("values");
@@ -130,6 +134,7 @@ public class TimeSeriesOutputMapperTests extends OpenSearchTestCase {
         Map<String, String> metric = (Map<String, String>) result.get("metric");
         assertFalse(metric.containsKey("__name__"));
         assertThat(metric, hasEntry("region", "us-west"));
+        assertFalse(result.containsKey("alias"));
     }
 
     public void testTransformToPromMatrix_WithEmptyLabels() {
@@ -143,8 +148,11 @@ public class TimeSeriesOutputMapperTests extends OpenSearchTestCase {
         // Assert
         @SuppressWarnings("unchecked")
         Map<String, String> metric = (Map<String, String>) result.get("metric");
-        assertThat(metric, hasEntry("__name__", "metric"));
-        assertEquals(1, metric.size());
+        assertFalse(metric.containsKey("__name__"));
+        assertEquals(0, metric.size());
+
+        // Verify alias is a separate field
+        assertThat(result.get("alias"), equalTo("metric"));
     }
 
     public void testTransformToTimeSeriesResult() {
@@ -212,7 +220,8 @@ public class TimeSeriesOutputMapperTests extends OpenSearchTestCase {
         @SuppressWarnings("unchecked")
         Map<String, String> metric = (Map<String, String>) result.get(0).get("metric");
         assertThat(metric, hasEntry("app", "frontend"));
-        assertThat(metric, hasEntry("__name__", "requests"));
+        assertFalse(metric.containsKey("__name__"));
+        assertThat(result.get(0).get("alias"), equalTo("requests"));
     }
 
     public void testExtractAndTransformToTimeSeriesResult() {
@@ -264,14 +273,15 @@ public class TimeSeriesOutputMapperTests extends OpenSearchTestCase {
 
     public void testTimeSeriesResult_Constructor() {
         // Arrange
-        Map<String, String> metric = Map.of("__name__", "cpu_usage", "host", "server1");
+        Map<String, String> metric = Map.of("host", "server1");
         List<List<Object>> values = Arrays.asList(Arrays.asList(1.0, "10.5"), Arrays.asList(2.0, "20.5"));
 
         // Act
-        TimeSeriesResult result = new TimeSeriesResult(metric, values);
+        TimeSeriesResult result = new TimeSeriesResult(metric, "cpu_usage", values);
 
         // Assert
         assertEquals(metric, result.metric());
+        assertEquals("cpu_usage", result.alias());
         assertEquals(values, result.values());
     }
 
@@ -279,11 +289,11 @@ public class TimeSeriesOutputMapperTests extends OpenSearchTestCase {
         // Arrange
         Map<String, String> metric1 = Map.of("host", "server1");
         List<List<Object>> values1 = Arrays.asList(Arrays.asList(1.0, "10.0"));
-        TimeSeriesResult result1 = new TimeSeriesResult(metric1, values1);
+        TimeSeriesResult result1 = new TimeSeriesResult(metric1, "alias1", values1);
 
         Map<String, String> metric2 = Map.of("host", "server1");
         List<List<Object>> values2 = Arrays.asList(Arrays.asList(1.0, "10.0"));
-        TimeSeriesResult result2 = new TimeSeriesResult(metric2, values2);
+        TimeSeriesResult result2 = new TimeSeriesResult(metric2, "alias1", values2);
 
         // Act & Assert
         assertEquals(result1, result2);
@@ -295,8 +305,8 @@ public class TimeSeriesOutputMapperTests extends OpenSearchTestCase {
         Map<String, String> metric1 = Map.of("host", "server1");
         Map<String, String> metric2 = Map.of("host", "server2");
         List<List<Object>> values = Arrays.asList(Arrays.asList(1.0, "10.0"));
-        TimeSeriesResult result1 = new TimeSeriesResult(metric1, values);
-        TimeSeriesResult result2 = new TimeSeriesResult(metric2, values);
+        TimeSeriesResult result1 = new TimeSeriesResult(metric1, null, values);
+        TimeSeriesResult result2 = new TimeSeriesResult(metric2, null, values);
 
         // Act & Assert
         assertNotEquals(result1, result2);
@@ -308,10 +318,11 @@ public class TimeSeriesOutputMapperTests extends OpenSearchTestCase {
         List<List<Object>> values = Arrays.asList(Arrays.asList(1.0, "5.0"));
 
         // Act
-        TimeSeriesResult result = new TimeSeriesResult(metric, values);
+        TimeSeriesResult result = new TimeSeriesResult(metric, null, values);
 
         // Assert
         assertTrue(result.metric().isEmpty());
+        assertNull(result.alias());
         assertEquals(1, result.values().size());
     }
 
@@ -321,10 +332,11 @@ public class TimeSeriesOutputMapperTests extends OpenSearchTestCase {
         List<List<Object>> values = Collections.emptyList();
 
         // Act
-        TimeSeriesResult result = new TimeSeriesResult(metric, values);
+        TimeSeriesResult result = new TimeSeriesResult(metric, "my_alias", values);
 
         // Assert
         assertEquals(1, result.metric().size());
+        assertEquals("my_alias", result.alias());
         assertTrue(result.values().isEmpty());
     }
 
@@ -332,7 +344,7 @@ public class TimeSeriesOutputMapperTests extends OpenSearchTestCase {
         // Arrange
         Map<String, String> metric = Map.of("env", "prod");
         List<List<Object>> values = Arrays.asList(Arrays.asList(1.0, "100.0"));
-        TimeSeriesResult result = new TimeSeriesResult(metric, values);
+        TimeSeriesResult result = new TimeSeriesResult(metric, "test_alias", values);
 
         // Act
         String resultStr = result.toString();
@@ -341,5 +353,6 @@ public class TimeSeriesOutputMapperTests extends OpenSearchTestCase {
         assertNotNull(resultStr);
         assertTrue(resultStr.contains("env"));
         assertTrue(resultStr.contains("prod"));
+        assertTrue(resultStr.contains("test_alias"));
     }
 }

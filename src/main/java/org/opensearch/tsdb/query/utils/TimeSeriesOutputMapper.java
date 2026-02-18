@@ -31,9 +31,7 @@ public class TimeSeriesOutputMapper {
     private static final String FIELD_STEP = "step";
     private static final String FIELD_START = "start";
     private static final String FIELD_END = "end";
-
-    // Prometheus label names
-    private static final String LABEL_NAME = "__name__";
+    private static final String FIELD_ALIAS = "alias";
 
     /**
      * Private constructor to prevent instantiation of this utility class.
@@ -45,10 +43,11 @@ public class TimeSeriesOutputMapper {
      * Contains metric labels and data points for one time series.
      * Used for both REST responses and test framework validation.
      *
-     * @param metric The metric labels (e.g., __name__, host, env)
+     * @param metric The metric labels (e.g., host, env)
+     * @param alias The alias for the time series (can be null)
      * @param values The time series values as [[timestamp, value], ...] pairs
      */
-    public record TimeSeriesResult(Map<String, String> metric, List<List<Object>> values) {
+    public record TimeSeriesResult(Map<String, String> metric, String alias, List<List<Object>> values) {
     }
 
     /**
@@ -96,12 +95,10 @@ public class TimeSeriesOutputMapper {
         // Add metric labels
         Map<String, String> labels = timeSeries.getLabels() != null ? new HashMap<>(timeSeries.getLabels().toMapView()) : new HashMap<>();
 
-        // Add alias as __name__ label if present (Prometheus convention)
-        if (timeSeries.getAlias() != null) {
-            labels.put(LABEL_NAME, timeSeries.getAlias());
-        }
-
         series.put(FIELD_METRIC, labels);
+        if (timeSeries.getAlias() != null) {
+            series.put(FIELD_ALIAS, timeSeries.getAlias());
+        }
 
         // Transform samples to values array
         series.put(FIELD_VALUES, transformSamplesToValues(timeSeries.getSamples()));
@@ -126,7 +123,7 @@ public class TimeSeriesOutputMapper {
         // Set metric labels
         Map<String, String> labels = timeSeries.getLabels() != null ? timeSeries.getLabels().toMapView() : new HashMap<>();
 
-        return new TimeSeriesResult(labels, transformSamplesToValues(timeSeries.getSamples()));
+        return new TimeSeriesResult(labels, timeSeries.getAlias(), transformSamplesToValues(timeSeries.getSamples()));
     }
 
     /**

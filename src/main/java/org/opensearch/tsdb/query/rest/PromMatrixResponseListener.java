@@ -46,10 +46,10 @@ import static org.opensearch.tsdb.metrics.TSDBMetricsConstants.NANOS_PER_MILLI;
  *     "result": [
  *       {
  *         "metric": {
- *           "__name__": "metric_name",
  *           "label1": "value1",
  *           "label2": "value2"
  *         },
+ *         "alias": "metric_name",
  *         "values": [
  *           [timestamp1, "value1"],
  *           [timestamp2, "value2"]
@@ -100,9 +100,6 @@ public class PromMatrixResponseListener extends RestToXContentListener<SearchRes
 
     // Response type values
     private static final String RESULT_TYPE_MATRIX = "matrix";
-
-    // Prometheus label names
-    private static final String LABEL_NAME = "__name__";
 
     // Aggregator name for profile extraction
     private static final String TIME_SERIES_UNFOLD_AGGREGATOR_NAME = TimeSeriesUnfoldAggregator.class.getSimpleName();

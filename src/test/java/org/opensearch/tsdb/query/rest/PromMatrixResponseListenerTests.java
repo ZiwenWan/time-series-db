@@ -146,7 +146,7 @@ public class PromMatrixResponseListenerTests extends OpenSearchTestCase {
         // Assert
         assertEquals(RestStatus.OK, response.status());
         String responseContent = response.content().utf8ToString();
-        assertThat(responseContent, containsString("\"__name__\""));
+        assertThat(responseContent, containsString("\"alias\""));
         assertThat(responseContent, containsString("\"my_metric\""));
     }
 
@@ -173,8 +173,7 @@ public class PromMatrixResponseListenerTests extends OpenSearchTestCase {
         assertThat(results, hasSize(1));
 
         // Verify it's the correct one from agg2
-        Map<String, String> metric = (Map<String, String>) results.get(0).get("metric");
-        assertThat(metric.get("__name__"), equalTo("metric-from-agg2"));
+        assertThat(results.get(0).get("alias"), equalTo("metric-from-agg2"));
     }
 
     public void testBuildResponseWithNonMatchingAggregationName() throws Exception {
@@ -288,8 +287,9 @@ public class PromMatrixResponseListenerTests extends OpenSearchTestCase {
         // Assert
         assertEquals(RestStatus.OK, response.status());
         String responseContent = response.content().utf8ToString();
-        // Should not contain __name__ when alias is null
+        // Should not contain __name__ or alias when alias is null
         assertFalse(responseContent.contains("\"__name__\""));
+        assertFalse(responseContent.contains("\"alias\""));
     }
 
     // ========== Metadata Field Tests ==========
@@ -395,8 +395,11 @@ public class PromMatrixResponseListenerTests extends OpenSearchTestCase {
         // Validate metric labels
         Map<String, String> metric = (Map<String, String>) result.get("metric");
         assertNotNull(metric);
-        assertThat(metric.get("__name__"), equalTo("my_metric"));
+        assertFalse(metric.containsKey("__name__"));
         assertThat(metric.get("region"), equalTo("us-east"));
+
+        // Validate alias is a separate field
+        assertThat(result.get("alias"), equalTo("my_metric"));
 
         // Validate values
         List<List<Object>> values = (List<List<Object>>) result.get("values");
@@ -448,12 +451,12 @@ public class PromMatrixResponseListenerTests extends OpenSearchTestCase {
 
         // Verify first time series
         Map<String, String> metric1 = (Map<String, String>) results.get(0).get("metric");
-        assertThat(metric1.get("__name__"), equalTo("metric1"));
+        assertThat(results.get(0).get("alias"), equalTo("metric1"));
         assertThat(metric1.get("id"), equalTo("1"));
 
         // Verify second time series
         Map<String, String> metric2 = (Map<String, String>) results.get(1).get("metric");
-        assertThat(metric2.get("__name__"), equalTo("metric2"));
+        assertThat(results.get(1).get("alias"), equalTo("metric2"));
         assertThat(metric2.get("id"), equalTo("2"));
 
         // Validate metadata fields at time series level
