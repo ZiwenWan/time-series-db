@@ -115,10 +115,40 @@ test_case:
         data:
           - metric: { }
             values: [-2.5,5,12,-6,7.5,4,-3,9.5,6,5,3,2]
+    - name: "streaming - min across POST series"
+      type: "m3ql"
+      indices: "e2e_query_execution"
+      query: "fetch method:POST | min"
+      streaming: true
+      time_config:
+        min_timestamp: "2025-01-01T02:00:00Z"
+        max_timestamp: "2025-01-01T03:00:00Z"
+        step: "5m"
+      expected:
+        status: "success"
+        data:
+          - metric: { }
+            values: [-2.5,5,12,-6,7.5,4,-3,9.5,6,5,3,2]
     - name: "aggregation - sum by method"
       type: "m3ql"
       indices: "e2e_query_execution"
       query: "fetch status:200 | sum method"
+      time_config:
+        min_timestamp: "2025-01-01T02:00:00Z"
+        max_timestamp: "2025-01-01T03:00:00Z"
+        step: "5m"
+      expected:
+        status: "success"
+        data:
+          - metric: { method: "GET" }
+            values: [ 3,6,9,12,15,14,13,12,11,24,23,22 ]
+          - metric: { method: "POST" }
+            values: [15,23,41,8,28,20,4.5,28.5,18,15,27,6]
+    - name: "streaming - sum by method"
+      type: "m3ql"
+      indices: "e2e_query_execution"
+      query: "fetch status:200 | sum method"
+      streaming: true
       time_config:
         min_timestamp: "2025-01-01T02:00:00Z"
         max_timestamp: "2025-01-01T03:00:00Z"
@@ -141,10 +171,36 @@ test_case:
       expected:
         status: "success"
         data: []
+    - name: "streaming - sum by non-existent tag"
+      type: "m3ql"
+      indices: "e2e_query_execution"
+      query: "fetch method:POST | sum non_existent_tag"
+      streaming: true
+      time_config:
+        min_timestamp: "2025-01-01T02:00:00Z"
+        max_timestamp: "2025-01-01T03:00:00Z"
+        step: "5m"
+      expected:
+        status: "success"
+        data: []
     - name: "aggregation - avg across POST series"
       type: "m3ql"
       indices: "e2e_query_execution"
       query: "fetch method:POST | avg"
+      time_config:
+        min_timestamp: "2025-01-01T02:00:00Z"
+        max_timestamp: "2025-01-01T03:00:00Z"
+        step: "5m"
+      expected:
+        status: "success"
+        data:
+          - metric: { }
+            values: [5.0, 11.5, 13.666666666666666, 4.0, 9.333333333333334, 6.666666666666667, 1.5, 9.5, 9.0, 5.0, 9.0, 2.0]
+    - name: "streaming - avg across POST series"
+      type: "m3ql"
+      indices: "e2e_query_execution"
+      query: "fetch method:POST | avg"
+      streaming: true
       time_config:
         min_timestamp: "2025-01-01T02:00:00Z"
         max_timestamp: "2025-01-01T03:00:00Z"
