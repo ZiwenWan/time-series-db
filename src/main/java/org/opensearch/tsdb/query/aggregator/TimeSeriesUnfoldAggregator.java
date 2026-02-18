@@ -785,6 +785,7 @@ public class TimeSeriesUnfoldAggregator extends BucketsAggregator {
         /**
          * Add debug info to profiler output.
          * Uses maxCircuitBreakerBytes (kept up to date by aggregator when circuit breaker changes).
+         * TODO Execution Stats will be exposed with another param
          */
         void add(BiConsumer<String, Object> add) {
             add.accept(ProfileInfoMapper.TOTAL_DOCS, totalDocCount);
