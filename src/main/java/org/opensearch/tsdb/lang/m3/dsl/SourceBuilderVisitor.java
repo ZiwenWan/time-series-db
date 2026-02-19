@@ -32,6 +32,7 @@ import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.TagSubPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.FallbackSeriesBinaryPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.IntersectPlanNode;
 import org.opensearch.tsdb.lang.m3.stage.AbsStage;
+import org.opensearch.tsdb.lang.m3.stage.AbstractGroupingStage;
 import org.opensearch.tsdb.lang.m3.stage.AliasByTagsStage;
 import org.opensearch.tsdb.lang.m3.stage.AliasStage;
 import org.opensearch.tsdb.lang.m3.stage.AsPercentStage;
@@ -199,20 +200,12 @@ public class SourceBuilderVisitor extends M3PlanVisitor<SourceBuilderVisitor.Com
         private Long truncateStartTime; // null means not yet set, use query start time
         private final Map<CacheableUnfoldAggregation, String> cacheableUnfoldReferences;
 
-        // Streaming aggregator support
-        private boolean eligibleForStreaming;
-        private StreamingAggregationType streamingAggregationType;
-        private List<String> streamingGroupByTags;
-
         private Context(long timeBuffer, long timeShift, boolean timeBufferAdjusted, Long truncateStartTime) {
             this.timeBuffer = timeBuffer;
             this.timeShift = timeShift;
             this.timeBufferAdjusted = timeBufferAdjusted;
             this.truncateStartTime = truncateStartTime;
             this.cacheableUnfoldReferences = new HashMap<>();
-            this.eligibleForStreaming = false;
-            this.streamingAggregationType = null;
-            this.streamingGroupByTags = null;
         }
 
         private static Context newContext() {
@@ -252,31 +245,6 @@ public class SourceBuilderVisitor extends M3PlanVisitor<SourceBuilderVisitor.Com
         private Long getTruncateStartTime() {
             return truncateStartTime;
         }
-
-        // Streaming aggregator methods
-        private void setStreamingEligible(StreamingAggregationType aggregationType, List<String> groupByTags) {
-            this.eligibleForStreaming = true;
-            this.streamingAggregationType = aggregationType;
-            this.streamingGroupByTags = groupByTags;
-        }
-
-        private void clearStreamingEligibility() {
-            this.eligibleForStreaming = false;
-            this.streamingAggregationType = null;
-            this.streamingGroupByTags = null;
-        }
-
-        private boolean isEligibleForStreaming() {
-            return eligibleForStreaming;
-        }
-
-        private StreamingAggregationType getStreamingAggregationType() {
-            return streamingAggregationType;
-        }
-
-        private List<String> getStreamingGroupByTags() {
-            return streamingGroupByTags;
-        }
     }
 
     @Override
@@ -297,30 +265,19 @@ public class SourceBuilderVisitor extends M3PlanVisitor<SourceBuilderVisitor.Com
     public ComponentHolder visit(AggregationPlanNode planNode) {
         validateChildCountExact(planNode, 1);
 
-        // Check if this aggregation is eligible for streaming optimization
-        if (isEligibleForStreamingAggregation(planNode)) {
-            // Mark for streaming instead of adding to stage stack
-            StreamingAggregationType streamingType = mapToStreamingAggregationType(planNode.getAggregationType());
-            context.setStreamingEligible(streamingType, planNode.getTags());
+        UnaryPipelineStage stage = switch (planNode.getAggregationType()) {
+            case AggregationType.SUM -> new SumStage(planNode.getTags());
+            case AggregationType.AVG -> new AvgStage(planNode.getTags());
+            case AggregationType.MIN -> new MinStage(planNode.getTags());
+            case AggregationType.MAX -> new MaxStage(planNode.getTags());
+            case AggregationType.MULTIPLY -> new MultiplyStage(planNode.getTags());
+            case AggregationType.COUNT -> new CountStage(planNode.getTags());
+            case AggregationType.RANGE -> new RangeStage(planNode.getTags());
+        };
 
-            // Continue to child (fetch node) without adding stages
-            return planNode.getChildren().getFirst().accept(this);
-        } else {
-            // Use traditional pipeline stage approach
-            UnaryPipelineStage stage = switch (planNode.getAggregationType()) {
-                case AggregationType.SUM -> new SumStage(planNode.getTags());
-                case AggregationType.AVG -> new AvgStage(planNode.getTags());
-                case AggregationType.MIN -> new MinStage(planNode.getTags());
-                case AggregationType.MAX -> new MaxStage(planNode.getTags());
-                case AggregationType.MULTIPLY -> new MultiplyStage(planNode.getTags());
-                case AggregationType.COUNT -> new CountStage(planNode.getTags());
-                case AggregationType.RANGE -> new RangeStage(planNode.getTags());
-            };
+        stageStack.add(stage);
 
-            stageStack.add(stage);
-
-            return planNode.getChildren().getFirst().accept(this);
-        }
+        return planNode.getChildren().getFirst().accept(this);
     }
 
     @Override
@@ -405,6 +362,11 @@ public class SourceBuilderVisitor extends M3PlanVisitor<SourceBuilderVisitor.Com
             TSDBMetrics.incrementCounter(METRICS.pushdownRequestsTotal, 1, Tags.create().addTag("mode", "disabled"));
         }
 
+        // removeEmpty right after fetch is a no-op — strip it to enable streaming optimization
+        if (!unfoldStages.isEmpty() && unfoldStages.get(0) instanceof RemoveEmptyStage) {
+            unfoldStages.remove(0);
+        }
+
         ComponentHolder holder = new ComponentHolder(planNode.getId());
 
         QueryBuilder query = buildQueryForFetch(planNode, fetchTimeRange);
@@ -422,22 +384,22 @@ public class SourceBuilderVisitor extends M3PlanVisitor<SourceBuilderVisitor.Com
             stageStack.push(new CopyStage());
         } else {
             // Check if eligible for streaming aggregation optimization
-            if (context.isEligibleForStreaming() && unfoldStages.isEmpty()) {
-                // Create streaming aggregation builder instead of unfold aggregation builder
+            if (params.streaming() && isStreamingEligibleStages(unfoldStages)) {
+                // The single stage is a supported aggregation — use streaming
+                AbstractGroupingStage aggStage = (AbstractGroupingStage) unfoldStages.get(0);
+                StreamingAggregationType streamingType = mapStageToStreamingType(aggStage);
+                List<String> groupByTags = aggStage.getGroupByLabels();
+
                 TimeSeriesStreamingAggregationBuilder streamingAggregationBuilder = new TimeSeriesStreamingAggregationBuilder(
                     unfoldName,
-                    context.getStreamingAggregationType(),
-                    context.getStreamingGroupByTags(),
+                    streamingType,
+                    groupByTags.isEmpty() ? null : groupByTags,
                     fetchTimeRange.start(),
                     fetchTimeRange.end(),
                     params.step()
                 );
 
-                // Set the streaming aggregation builder for the FetchPlanNode
                 holder.setUnfoldAggregationBuilder(streamingAggregationBuilder);
-
-                // Clear streaming state after use
-                context.clearStreamingEligibility();
             } else {
                 // Use traditional unfold aggregation builder
                 TimeSeriesUnfoldAggregationBuilder unfoldPipelineAggregationBuilder = new TimeSeriesUnfoldAggregationBuilder(
@@ -828,43 +790,25 @@ public class SourceBuilderVisitor extends M3PlanVisitor<SourceBuilderVisitor.Com
     }
 
     /**
-     * Check if an aggregation plan node is eligible for streaming optimization.
-     *
-     * @param planNode The aggregation plan node to check
-     * @return true if eligible for streaming, false otherwise
+     * Check if unfoldStages consists of exactly one supported streaming aggregation stage.
      */
-    private boolean isEligibleForStreamingAggregation(AggregationPlanNode planNode) {
-        // Only eligible if streaming is enabled via query params
-        if (!params.streaming()) {
+    private boolean isStreamingEligibleStages(List<UnaryPipelineStage> unfoldStages) {
+        if (unfoldStages.size() != 1) {
             return false;
         }
-
-        // Only eligible if no previous stages (direct after fetch)
-        if (!stageStack.isEmpty()) {
-            return false;
-        }
-
-        // Only support specific aggregation types
-        return switch (planNode.getAggregationType()) {
-            case AggregationType.SUM, AggregationType.AVG, AggregationType.MIN, AggregationType.MAX -> true;
-            default -> false;
-        };
+        UnaryPipelineStage stage = unfoldStages.get(0);
+        return stage instanceof SumStage || stage instanceof MinStage || stage instanceof MaxStage || stage instanceof AvgStage;
     }
 
     /**
-     * Map M3QL aggregation type to streaming aggregation type.
-     *
-     * @param aggregationType The M3QL aggregation type
-     * @return The corresponding streaming aggregation type
+     * Map a pipeline stage instance to the corresponding StreamingAggregationType.
      */
-    private StreamingAggregationType mapToStreamingAggregationType(AggregationType aggregationType) {
-        return switch (aggregationType) {
-            case AggregationType.SUM -> StreamingAggregationType.SUM;
-            case AggregationType.AVG -> StreamingAggregationType.AVG;
-            case AggregationType.MIN -> StreamingAggregationType.MIN;
-            case AggregationType.MAX -> StreamingAggregationType.MAX;
-            default -> throw new IllegalArgumentException("Unsupported aggregation type for streaming: " + aggregationType);
-        };
+    private StreamingAggregationType mapStageToStreamingType(UnaryPipelineStage stage) {
+        if (stage instanceof SumStage) return StreamingAggregationType.SUM;
+        if (stage instanceof MinStage) return StreamingAggregationType.MIN;
+        if (stage instanceof MaxStage) return StreamingAggregationType.MAX;
+        if (stage instanceof AvgStage) return StreamingAggregationType.AVG;
+        throw new IllegalArgumentException("Unsupported stage for streaming: " + stage.getName());
     }
 
     private static void validateChildCountExact(M3PlanNode node, int expected) {
