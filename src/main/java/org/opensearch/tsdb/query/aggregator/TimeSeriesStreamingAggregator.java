@@ -297,7 +297,7 @@ public class TimeSeriesStreamingAggregator extends BucketsAggregator {
     private static class NoTagStreamingState implements StreamingAggregationState {
         private final StreamingAggregationType aggregationType;
         private final double[] values;
-        private final long[] counts; // Only used for AVG
+        private final int[] counts; // Only used for AVG
         private final long minTimestamp;
         private final long maxTimestamp;
         private final long step;
@@ -312,7 +312,7 @@ public class TimeSeriesStreamingAggregator extends BucketsAggregator {
         ) {
             this.aggregationType = aggregationType;
             this.values = new double[timeArraySize];
-            this.counts = aggregationType.requiresCountTracking() ? new long[timeArraySize] : null;
+            this.counts = aggregationType.requiresCountTracking() ? new int[timeArraySize] : null;
             this.minTimestamp = minTimestamp;
             this.maxTimestamp = maxTimestamp;
             this.step = step;
@@ -435,7 +435,7 @@ public class TimeSeriesStreamingAggregator extends BucketsAggregator {
         public long getEstimatedMemoryUsage() {
             long arraySize = values.length * 8; // double array
             if (counts != null) {
-                arraySize += counts.length * 8; // long array
+                arraySize += counts.length * 4; // int array
             }
             return arraySize + 64; // object overhead
         }
@@ -576,12 +576,12 @@ public class TimeSeriesStreamingAggregator extends BucketsAggregator {
      */
     private static class GroupTimeArrays {
         private final double[] values;
-        private final long[] counts; // Only used for AVG
+        private final int[] counts; // Only used for AVG
         private boolean hasData = false;
 
         public GroupTimeArrays(int size, boolean needsCounts) {
             this.values = new double[size];
-            this.counts = needsCounts ? new long[size] : null;
+            this.counts = needsCounts ? new int[size] : null;
             Arrays.fill(values, Double.NaN);
         }
 
@@ -634,7 +634,7 @@ public class TimeSeriesStreamingAggregator extends BucketsAggregator {
         public long getEstimatedMemoryUsage() {
             long size = values.length * 8; // double array
             if (counts != null) {
-                size += counts.length * 8; // long array
+                size += counts.length * 4; // int array
             }
             return size + 32; // object overhead
         }
