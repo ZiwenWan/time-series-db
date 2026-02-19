@@ -119,12 +119,7 @@
           "time_series_unfold" : {
             "min_timestamp" : 1000000000,
             "max_timestamp" : 1001000000,
-            "step" : 100000,
-            "stages" : [
-              {
-                "type" : "remove_empty"
-              }
-            ]
+            "step" : 100000
           }
         }
       }
