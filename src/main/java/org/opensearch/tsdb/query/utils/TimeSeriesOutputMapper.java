@@ -87,16 +87,17 @@ public class TimeSeriesOutputMapper {
      *
      * @param timeSeries The time series to transform
      * @param includeMetadata Whether to include the metadata fields (step, start, end)
+     * @param includeAlias Whether to include the alias field in the output
      * @return Map representing the Prometheus matrix format
      */
-    public static Map<String, Object> transformToPromMatrix(TimeSeries timeSeries, boolean includeMetadata) {
+    public static Map<String, Object> transformToPromMatrix(TimeSeries timeSeries, boolean includeMetadata, boolean includeAlias) {
         Map<String, Object> series = new HashMap<>();
 
         // Add metric labels
         Map<String, String> labels = timeSeries.getLabels() != null ? new HashMap<>(timeSeries.getLabels().toMapView()) : new HashMap<>();
 
         series.put(FIELD_METRIC, labels);
-        if (timeSeries.getAlias() != null) {
+        if (includeAlias && timeSeries.getAlias() != null) {
             series.put(FIELD_ALIAS, timeSeries.getAlias());
         }
 
@@ -177,18 +178,20 @@ public class TimeSeriesOutputMapper {
      * @param aggregations The aggregations to extract from
      * @param finalAggName The name of the final aggregation to extract (null for all)
      * @param includeMetadata Whether to include the metadata fields (step, start, end) in each time series
+     * @param includeAlias Whether to include the alias field in each time series
      * @return List of Prometheus matrix formatted results
      */
     public static List<Map<String, Object>> extractAndTransformToPromMatrix(
         Aggregations aggregations,
         String finalAggName,
-        boolean includeMetadata
+        boolean includeMetadata,
+        boolean includeAlias
     ) {
         List<Map<String, Object>> result = new ArrayList<>();
         List<TimeSeries> timeSeriesList = extractTimeSeriesFromAggregations(aggregations, finalAggName);
 
         for (TimeSeries timeSeries : timeSeriesList) {
-            result.add(transformToPromMatrix(timeSeries, includeMetadata));
+            result.add(transformToPromMatrix(timeSeries, includeMetadata, includeAlias));
         }
 
         return result;

@@ -96,7 +96,7 @@ public class TimeSeriesOutputMapperTests extends OpenSearchTestCase {
         TimeSeries ts = new TimeSeries(samples, labels, 1000L, 2000L, 1000L, "my_metric");
 
         // Act
-        Map<String, Object> result = TimeSeriesOutputMapper.transformToPromMatrix(ts, false);
+        Map<String, Object> result = TimeSeriesOutputMapper.transformToPromMatrix(ts, false, true);
 
         // Assert
         assertNotNull(result);
@@ -120,6 +120,25 @@ public class TimeSeriesOutputMapperTests extends OpenSearchTestCase {
         assertEquals("10.0", values.get(0).get(1));
     }
 
+    public void testTransformToPromMatrix_WithLabelsAndAlias_IncludeAliasFalse() {
+        // Arrange
+        Labels labels = ByteLabels.fromStrings("region", "us-east", "service", "api");
+        List<Sample> samples = Arrays.asList(new FloatSample(1000L, 10.0), new FloatSample(2000L, 20.0));
+        TimeSeries ts = new TimeSeries(samples, labels, 1000L, 2000L, 1000L, "my_metric");
+
+        // Act
+        Map<String, Object> result = TimeSeriesOutputMapper.transformToPromMatrix(ts, false, false);
+
+        // Assert - alias should NOT be present when includeAlias is false
+        assertFalse(result.containsKey("alias"));
+
+        @SuppressWarnings("unchecked")
+        Map<String, String> metric = (Map<String, String>) result.get("metric");
+        assertThat(metric, hasEntry("region", "us-east"));
+        assertThat(metric, hasEntry("service", "api"));
+        assertFalse(metric.containsKey("__name__"));
+    }
+
     public void testTransformToPromMatrix_WithoutAlias() {
         // Arrange
         Labels labels = ByteLabels.fromStrings("region", "us-west");
@@ -127,8 +146,7 @@ public class TimeSeriesOutputMapperTests extends OpenSearchTestCase {
         TimeSeries ts = new TimeSeries(samples, labels, 1000L, 1000L, 1000L, null);
 
         // Act
-        Map<String, Object> result = TimeSeriesOutputMapper.transformToPromMatrix(ts, false);
-
+        Map<String, Object> result = TimeSeriesOutputMapper.transformToPromMatrix(ts, false, true);
         // Assert
         @SuppressWarnings("unchecked")
         Map<String, String> metric = (Map<String, String>) result.get("metric");
@@ -143,8 +161,7 @@ public class TimeSeriesOutputMapperTests extends OpenSearchTestCase {
         TimeSeries ts = new TimeSeries(samples, null, 1000L, 1000L, 1000L, "metric");
 
         // Act
-        Map<String, Object> result = TimeSeriesOutputMapper.transformToPromMatrix(ts, false);
-
+        Map<String, Object> result = TimeSeriesOutputMapper.transformToPromMatrix(ts, false, true);
         // Assert
         @SuppressWarnings("unchecked")
         Map<String, String> metric = (Map<String, String>) result.get("metric");
@@ -213,7 +230,7 @@ public class TimeSeriesOutputMapperTests extends OpenSearchTestCase {
         Aggregations aggregations = new Aggregations(List.of(internalTs));
 
         // Act
-        List<Map<String, Object>> result = TimeSeriesOutputMapper.extractAndTransformToPromMatrix(aggregations, "final_agg", false);
+        List<Map<String, Object>> result = TimeSeriesOutputMapper.extractAndTransformToPromMatrix(aggregations, "final_agg", false, true);
 
         // Assert
         assertThat(result, hasSize(1));
@@ -255,7 +272,7 @@ public class TimeSeriesOutputMapperTests extends OpenSearchTestCase {
         Aggregations aggregations = new Aggregations(List.of(internalTs));
 
         // Act
-        List<Map<String, Object>> result = TimeSeriesOutputMapper.extractAndTransformToPromMatrix(aggregations, "agg", false);
+        List<Map<String, Object>> result = TimeSeriesOutputMapper.extractAndTransformToPromMatrix(aggregations, "agg", false, true);
 
         // Assert
         assertThat(result, hasSize(2));
