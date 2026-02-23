@@ -56,6 +56,7 @@ import org.opensearch.tsdb.lang.m3.stage.SubtractStage;
 import org.opensearch.tsdb.lang.m3.stage.SumStage;
 import org.opensearch.tsdb.lang.m3.stage.SummarizeStage;
 import org.opensearch.tsdb.lang.m3.stage.SustainStage;
+import org.opensearch.tsdb.lang.m3.stage.TagCompareStage;
 import org.opensearch.tsdb.lang.m3.stage.TagSubStage;
 import org.opensearch.tsdb.lang.m3.stage.TimeshiftStage;
 import org.opensearch.tsdb.lang.m3.stage.TopKStage;
@@ -63,6 +64,8 @@ import org.opensearch.tsdb.lang.m3.stage.TransformNullStage;
 import org.opensearch.tsdb.lang.m3.stage.TruncateStage;
 import org.opensearch.tsdb.lang.m3.stage.UnionStage;
 import org.opensearch.tsdb.lang.m3.stage.ValueFilterStage;
+import org.opensearch.tsdb.lang.m3.stage.WhereStage;
+import org.opensearch.tsdb.lang.m3.stage.MapKeyStage;
 
 /**
  * Factory class for creating pipeline stage instances from string definitions.
@@ -133,6 +136,7 @@ public class PipelineStageFactory {
             registerStage(DivideStage.class);
             registerStage(ExcludeByTagStage.class);
             registerStage(TagSubStage.class);
+            registerStage(TagCompareStage.class);
             registerStage(FallbackSeriesBinaryStage.class);
             registerStage(FallbackSeriesUnaryStage.class);
             registerStage(SliceStage.class);
@@ -142,6 +146,7 @@ public class PipelineStageFactory {
             registerStage(IsNonNullStage.class);
             registerStage(KeepLastValueStage.class);
             registerStage(LogarithmStage.class);
+            registerStage(MapKeyStage.class);
             registerStage(MaxStage.class);
             registerStage(MinStage.class);
             registerStage(MovingStage.class);
@@ -168,6 +173,7 @@ public class PipelineStageFactory {
             registerStage(TruncateStage.class);
             registerStage(UnionStage.class);
             registerStage(ValueFilterStage.class);
+            registerStage(WhereStage.class);
             registerStage(CopyStage.class);
         } catch (Exception e) {
             throw new RuntimeException("Failed to auto-register pipeline stages", e);

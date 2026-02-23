@@ -23,6 +23,10 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.LongConsumer;
+
+import org.apache.lucene.util.RamUsageEstimator;
+import org.opensearch.tsdb.query.utils.RamUsageConstants;
 
 /**
  * Abstract base class for pipeline stages that support label grouping and calculation for each Sample.
@@ -77,6 +81,14 @@ public abstract class AbstractGroupingSampleStage<A> extends AbstractGroupingSta
      * like {@link org.opensearch.tsdb.core.model.SumCountSample}
      */
     protected abstract Sample bucketToSample(long timestamp, A bucket);
+
+    /**
+     * Estimate the memory size of a single aggregation state value.
+     * Used for circuit breaker tracking during reduce operations.
+     *
+     * @return Estimated bytes for one state value (e.g., Double, SumCountSample)
+     */
+    protected abstract long estimateStateSize();
 
     /**
      * Process a group of time series using the template method pattern.
@@ -143,8 +155,12 @@ public abstract class AbstractGroupingSampleStage<A> extends AbstractGroupingSta
         List<TimeSeriesProvider> aggregations,
         TimeSeriesProvider firstAgg,
         TimeSeries firstTimeSeries,
-        boolean isFinalReduce
+        boolean isFinalReduce,
+        LongConsumer circuitBreakerConsumer
     ) {
+        // Track outer HashMap allocation
+        circuitBreakerConsumer.accept(RamUsageConstants.HASHMAP_SHALLOW_SIZE);
+
         // Combine samples by group across all aggregations
         Map<ByteLabels, Map<Long, A>> groupToTimestampSample = new HashMap<>();
 
@@ -152,12 +168,25 @@ public abstract class AbstractGroupingSampleStage<A> extends AbstractGroupingSta
             for (TimeSeries series : aggregation.getTimeSeries()) {
                 // For global case (no grouping), use empty labels
                 ByteLabels groupLabels = extractGroupLabelsDirect(series);
+
+                // Track new group allocation
+                boolean isNewGroup = !groupToTimestampSample.containsKey(groupLabels);
+                if (isNewGroup) {
+                    // Track: HashMap entry + labels + inner HashMap
+                    circuitBreakerConsumer.accept(
+                        RamUsageConstants.groupEntryBaseOverhead(groupLabels) + RamUsageConstants.HASHMAP_SHALLOW_SIZE
+                    );
+                }
+
                 Map<Long, A> timestampToSample = groupToTimestampSample.computeIfAbsent(groupLabels, k -> new HashMap<>());
 
                 // Aggregate samples for this series into the group's timestamp map
-                aggregateSamplesIntoMap(series.getSamples(), timestampToSample);
+                aggregateSamplesIntoMap(series.getSamples(), timestampToSample, circuitBreakerConsumer);
             }
         }
+
+        // Track result ArrayList allocation
+        circuitBreakerConsumer.accept(SampleList.ARRAYLIST_OVERHEAD);
 
         // Create the final aggregated time series for each group
         // Pre-allocate result list since we know exactly how many groups we have
@@ -176,6 +205,9 @@ public abstract class AbstractGroupingSampleStage<A> extends AbstractGroupingSta
             });
 
             Labels finalLabels = groupLabels.isEmpty() ? ByteLabels.emptyLabels() : groupLabels;
+
+            // Track TimeSeries memory
+            circuitBreakerConsumer.accept(TimeSeries.ESTIMATED_MEMORY_OVERHEAD + finalLabels.ramBytesUsed());
 
             // Use metadata from the first nonEmpty time series
             resultTimeSeries.add(
@@ -204,7 +236,7 @@ public abstract class AbstractGroupingSampleStage<A> extends AbstractGroupingSta
     /**
      * Helper method to aggregate samples into an existing timestamp map.
      */
-    private void aggregateSamplesIntoMap(SampleList samples, Map<Long, A> timestampToSample) {
+    private void aggregateSamplesIntoMap(SampleList samples, Map<Long, A> timestampToSample, LongConsumer circuitBreakerConsumer) {
         for (Sample sample : samples) {
             // Skip NaN values - treat them as null/missing (MultiValueSample does not support getValue())
             if (!(sample instanceof MultiValueSample) && Double.isNaN(sample.getValue())) {
@@ -212,7 +244,15 @@ public abstract class AbstractGroupingSampleStage<A> extends AbstractGroupingSta
             }
             long timestamp = sample.getTimestamp();
 
+            // Track new timestamp entry allocation
+            boolean isNewTimestamp = !timestampToSample.containsKey(timestamp);
+
             timestampToSample.compute(timestamp, (ts, a) -> aggregateSingleSample(a, sample));
+
+            if (isNewTimestamp) {
+                // Track HashMap entry overhead for new timestamp (key + value)
+                circuitBreakerConsumer.accept(RamUsageEstimator.HASHTABLE_RAM_BYTES_PER_ENTRY + Long.BYTES + estimateStateSize());
+            }
         }
     }
 
