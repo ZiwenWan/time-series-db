@@ -44,12 +44,14 @@ interface StreamingAggregationState {
 class GroupTimeArrays {
     private final double[] values;
     private final int[] counts; // Only used for AVG
+    private final StreamingAggregationType aggregationType;
     private boolean hasData = false;
     private int nonNanCount = 0;
 
-    GroupTimeArrays(int size, boolean needsCounts) {
+    GroupTimeArrays(int size, StreamingAggregationType aggregationType) {
         this.values = new double[size];
-        this.counts = needsCounts ? new int[size] : null;
+        this.aggregationType = aggregationType;
+        this.counts = aggregationType.requiresCountTracking() ? new int[size] : null;
         Arrays.fill(values, Double.NaN);
     }
 
@@ -57,9 +59,9 @@ class GroupTimeArrays {
         return values.length;
     }
 
-    void aggregate(int timeIndex, double value, StreamingAggregationType type) {
+    void aggregate(int timeIndex, double value) {
         boolean wasNaN = Double.isNaN(values[timeIndex]);
-        switch (type) {
+        switch (aggregationType) {
             case SUM:
                 values[timeIndex] = wasNaN ? value : values[timeIndex] + value;
                 break;
@@ -80,13 +82,13 @@ class GroupTimeArrays {
         hasData = true;
     }
 
-    SampleList createSampleList(long minTimestamp, long step, StreamingAggregationType type) {
+    SampleList createSampleList(long minTimestamp, long step) {
         if (!hasData) {
             return SampleList.fromList(Collections.emptyList());
         }
 
         // AVG uses SumCountSample, which is not a simple float sample
-        if (type == StreamingAggregationType.AVG) {
+        if (aggregationType == StreamingAggregationType.AVG) {
             List<Sample> samples = new ArrayList<>(nonNanCount);
             for (int i = 0; i < values.length; i++) {
                 if (!Double.isNaN(values[i]) && counts[i] > 0) {
@@ -111,14 +113,6 @@ class GroupTimeArrays {
         return hasData;
     }
 
-    /**
-     * Find the start index in a sample list using binary search.
-     */
-    static int findStartIndex(SampleList samples, long minTimestamp) {
-        int index = samples.search(minTimestamp);
-        return index >= 0 ? index : -(index + 1);
-    }
-
     long getEstimatedMemoryUsage() {
         long size = values.length * 8; // double array
         if (counts != null) {
@@ -140,7 +134,7 @@ class NoTagStreamingState implements StreamingAggregationState {
 
     NoTagStreamingState(StreamingAggregationType aggregationType, int timeArraySize, long minTimestamp, long maxTimestamp, long step) {
         this.aggregationType = aggregationType;
-        this.arrays = new GroupTimeArrays(timeArraySize, aggregationType.requiresCountTracking());
+        this.arrays = new GroupTimeArrays(timeArraySize, aggregationType);
         this.minTimestamp = minTimestamp;
         this.maxTimestamp = maxTimestamp;
         this.step = step;
@@ -158,9 +152,8 @@ class NoTagStreamingState implements StreamingAggregationState {
 
     private void processChunk(ChunkIterator chunk) throws IOException {
         SampleList samples = chunk.decodeSamples(this.minTimestamp, this.maxTimestamp).samples();
-        int startIndex = GroupTimeArrays.findStartIndex(samples, this.minTimestamp);
 
-        for (int i = startIndex; i < samples.size(); i++) {
+        for (int i = 0; i < samples.size(); i++) {
             double value = samples.getValue(i);
             // Skip NaN samples during collection
             if (Double.isNaN(value)) {
@@ -170,7 +163,7 @@ class NoTagStreamingState implements StreamingAggregationState {
             // Calculate time index for direct array access
             int timeIndex = (int) ((samples.getTimestamp(i) - minTimestamp) / step);
             if (timeIndex >= 0 && timeIndex < arrays.size()) {
-                arrays.aggregate(timeIndex, value, aggregationType);
+                arrays.aggregate(timeIndex, value);
             }
         }
     }
@@ -181,7 +174,7 @@ class NoTagStreamingState implements StreamingAggregationState {
             return Collections.emptyList();
         }
 
-        SampleList sampleList = arrays.createSampleList(minTimestamp, step, aggregationType);
+        SampleList sampleList = arrays.createSampleList(minTimestamp, step);
         if (sampleList.isEmpty()) {
             return Collections.emptyList();
         }
@@ -243,10 +236,7 @@ class TagStreamingState implements StreamingAggregationState {
         }
 
         // Get or create group arrays for this label combination
-        GroupTimeArrays arrays = groupData.computeIfAbsent(
-            groupLabels,
-            k -> new GroupTimeArrays(timeArraySize, aggregationType.requiresCountTracking())
-        );
+        GroupTimeArrays arrays = groupData.computeIfAbsent(groupLabels, k -> new GroupTimeArrays(timeArraySize, aggregationType));
 
         // Process chunks for this group
         List<ChunkIterator> chunks = reader.chunksForDoc(docId, docValues);
@@ -274,9 +264,8 @@ class TagStreamingState implements StreamingAggregationState {
 
     private void processChunkForGroup(ChunkIterator chunk, GroupTimeArrays arrays) throws IOException {
         SampleList samples = chunk.decodeSamples(this.minTimestamp, this.maxTimestamp).samples();
-        int startIndex = GroupTimeArrays.findStartIndex(samples, this.minTimestamp);
 
-        for (int i = startIndex; i < samples.size(); i++) {
+        for (int i = 0; i < samples.size(); i++) {
             double value = samples.getValue(i);
             if (Double.isNaN(value)) {
                 continue;
@@ -284,7 +273,7 @@ class TagStreamingState implements StreamingAggregationState {
 
             int timeIndex = (int) ((samples.getTimestamp(i) - minTimestamp) / step);
             if (timeIndex >= 0 && timeIndex < timeArraySize) {
-                arrays.aggregate(timeIndex, value, aggregationType);
+                arrays.aggregate(timeIndex, value);
             }
         }
     }
@@ -297,7 +286,7 @@ class TagStreamingState implements StreamingAggregationState {
             ByteLabels groupLabels = entry.getKey();
             GroupTimeArrays arrays = entry.getValue();
 
-            SampleList sampleList = arrays.createSampleList(minTimestamp, step, aggregationType);
+            SampleList sampleList = arrays.createSampleList(minTimestamp, step);
             if (!sampleList.isEmpty()) {
                 TimeSeries timeSeries = new TimeSeries(
                     sampleList,
