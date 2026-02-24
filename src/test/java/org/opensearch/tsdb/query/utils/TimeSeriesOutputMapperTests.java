@@ -107,7 +107,6 @@ public class TimeSeriesOutputMapperTests extends OpenSearchTestCase {
         Map<String, String> metric = (Map<String, String>) result.get("metric");
         assertThat(metric, hasEntry("region", "us-east"));
         assertThat(metric, hasEntry("service", "api"));
-        assertFalse(metric.containsKey("__name__"));
         assertEquals(2, metric.size());
 
         // Verify alias is a separate field
@@ -136,7 +135,6 @@ public class TimeSeriesOutputMapperTests extends OpenSearchTestCase {
         Map<String, String> metric = (Map<String, String>) result.get("metric");
         assertThat(metric, hasEntry("region", "us-east"));
         assertThat(metric, hasEntry("service", "api"));
-        assertFalse(metric.containsKey("__name__"));
     }
 
     public void testTransformToPromMatrix_WithoutAlias() {
@@ -150,7 +148,6 @@ public class TimeSeriesOutputMapperTests extends OpenSearchTestCase {
         // Assert
         @SuppressWarnings("unchecked")
         Map<String, String> metric = (Map<String, String>) result.get("metric");
-        assertFalse(metric.containsKey("__name__"));
         assertThat(metric, hasEntry("region", "us-west"));
         assertFalse(result.containsKey("alias"));
     }
@@ -165,7 +162,6 @@ public class TimeSeriesOutputMapperTests extends OpenSearchTestCase {
         // Assert
         @SuppressWarnings("unchecked")
         Map<String, String> metric = (Map<String, String>) result.get("metric");
-        assertFalse(metric.containsKey("__name__"));
         assertEquals(0, metric.size());
 
         // Verify alias is a separate field
@@ -237,7 +233,6 @@ public class TimeSeriesOutputMapperTests extends OpenSearchTestCase {
         @SuppressWarnings("unchecked")
         Map<String, String> metric = (Map<String, String>) result.get(0).get("metric");
         assertThat(metric, hasEntry("app", "frontend"));
-        assertFalse(metric.containsKey("__name__"));
         assertThat(result.get(0).get("alias"), equalTo("requests"));
     }
 

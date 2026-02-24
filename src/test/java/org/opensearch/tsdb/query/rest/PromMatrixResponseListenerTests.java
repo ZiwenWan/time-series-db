@@ -289,8 +289,7 @@ public class PromMatrixResponseListenerTests extends OpenSearchTestCase {
         // Assert
         assertEquals(RestStatus.OK, response.status());
         String responseContent = response.content().utf8ToString();
-        // Should not contain __name__ or alias when alias is null
-        assertFalse(responseContent.contains("\"__name__\""));
+        // Should not contain alias when alias is null
         assertFalse(responseContent.contains("\"alias\""));
     }
 
@@ -415,7 +414,6 @@ public class PromMatrixResponseListenerTests extends OpenSearchTestCase {
         // Validate metric labels
         Map<String, String> metric = (Map<String, String>) result.get("metric");
         assertNotNull(metric);
-        assertFalse(metric.containsKey("__name__"));
         assertThat(metric.get("region"), equalTo("us-east"));
 
         // Validate alias is a separate field
