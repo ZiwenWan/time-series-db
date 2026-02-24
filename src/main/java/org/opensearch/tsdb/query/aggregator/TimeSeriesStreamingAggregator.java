@@ -148,7 +148,10 @@ public class TimeSeriesStreamingAggregator extends BucketsAggregator {
      * Calculate the required array size for the time range.
      */
     private static int calculateTimeArraySize(long minTimestamp, long maxTimestamp, long step) {
-        return (int) ((maxTimestamp - minTimestamp) / step) + 1;
+        if (maxTimestamp <= minTimestamp) {
+            throw new IllegalArgumentException("maxTimestamp must be greater than minTimestamp");
+        }
+        return (int) ((maxTimestamp - 1 - minTimestamp) / step) + 1;
     }
 
     @Override

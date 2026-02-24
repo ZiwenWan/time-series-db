@@ -114,9 +114,9 @@ public class TimeSeriesStreamingAggregatorFactory extends AggregatorFactory {
 
     @Override
     protected boolean supportsConcurrentSegmentSearch() {
-        // Streaming aggregations are CSS-safe for all supported types
-        // because they work with idempotent operations that can be
-        // safely merged across segment boundaries
+        // CSS-safe because TSDB's data model guarantees no duplicate samples across segments:
+        // each time series sample exists in exactly one segment, so concurrent segment reads
+        // produce disjoint inputs that can be safely merged via reduce.
         return true;
     }
 
@@ -166,20 +166,11 @@ public class TimeSeriesStreamingAggregatorFactory extends AggregatorFactory {
     }
 
     /**
-     * Returns true if this factory is configured for global aggregation (no grouping).
-     *
-     * @return true if groupByTags is null or empty, false otherwise
-     */
-    public boolean isGlobalAggregation() {
-        return groupByTags == null || groupByTags.isEmpty();
-    }
-
-    /**
      * Get estimated time array size for memory planning.
      *
      * @return The calculated array size based on time range and step
      */
     public int getEstimatedTimeArraySize() {
-        return (int) ((maxTimestamp - minTimestamp) / step) + 1;
+        return (int) ((maxTimestamp - 1 - minTimestamp) / step) + 1;
     }
 }

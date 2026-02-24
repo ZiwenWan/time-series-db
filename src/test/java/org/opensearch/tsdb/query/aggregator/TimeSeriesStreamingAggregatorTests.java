@@ -165,8 +165,8 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
     public void testCalculateTimeArraySize() throws IOException {
         // Use factory's getEstimatedTimeArraySize() which uses the same formula
         TimeSeriesStreamingAggregatorFactory factory = createFactory(StreamingAggregationType.SUM, null, 1000L, 5000L, 100L);
-        // (5000 - 1000) / 100 + 1 = 41
-        assertEquals(41, factory.getEstimatedTimeArraySize());
+        // (5000 - 1 - 1000) / 100 + 1 = 40
+        assertEquals(40, factory.getEstimatedTimeArraySize());
 
         // Edge case: single point
         TimeSeriesStreamingAggregatorFactory singlePointFactory = createFactory(StreamingAggregationType.SUM, null, 1000L, 1000L, 100L);
@@ -175,8 +175,8 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
 
         // Larger range
         TimeSeriesStreamingAggregatorFactory largeFactory = createFactory(StreamingAggregationType.SUM, null, 0L, 3600000L, 300000L);
-        // (3600000 - 0) / 300000 + 1 = 13
-        assertEquals(13, largeFactory.getEstimatedTimeArraySize());
+        // (3600000 - 1 - 0) / 300000 + 1 = 12
+        assertEquals(12, largeFactory.getEstimatedTimeArraySize());
     }
 
     // ---- Factory tests ----
@@ -195,20 +195,6 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
         assertEquals(2000L, factory.getMinTimestamp());
         assertEquals(8000L, factory.getMaxTimestamp());
         assertEquals(500L, factory.getStep());
-    }
-
-    public void testIsGlobalAggregation() throws IOException {
-        // null tags -> global
-        TimeSeriesStreamingAggregatorFactory nullTagsFactory = createFactory(StreamingAggregationType.SUM, null, 1000L, 5000L, 100L);
-        assertTrue("null groupByTags should be global aggregation", nullTagsFactory.isGlobalAggregation());
-
-        // empty tags -> global
-        TimeSeriesStreamingAggregatorFactory emptyTagsFactory = createFactory(StreamingAggregationType.SUM, List.of(), 1000L, 5000L, 100L);
-        assertTrue("empty groupByTags should be global aggregation", emptyTagsFactory.isGlobalAggregation());
-
-        // non-empty tags -> not global
-        TimeSeriesStreamingAggregatorFactory tagFactory = createFactory(StreamingAggregationType.SUM, List.of("host"), 1000L, 5000L, 100L);
-        assertFalse("non-empty groupByTags should not be global aggregation", tagFactory.isGlobalAggregation());
     }
 
     // ---- No-tag aggregation data processing tests ----
