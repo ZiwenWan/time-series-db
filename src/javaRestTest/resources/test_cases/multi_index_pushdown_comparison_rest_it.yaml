@@ -45,22 +45,7 @@ test_case:
       type: "m3ql"
       query: "fetch name:requests service:api | sum"
       indices: "metrics_index1,metrics_index2"
-      time_config:
-        min_timestamp: "2025-01-01T00:00:00Z"
-        max_timestamp: "2025-01-01T01:00:00Z"
-        step: "5m"
-      expected:
-        status: "success"
-        data:
-          - metric: {}
-            values: [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120]
-
-    # Query 1b: Streaming sum with pushdown enabled
-    - name: "streaming - multi_index_sum_with_pushdown"
-      type: "m3ql"
-      query: "fetch name:requests service:api | sum"
-      indices: "metrics_index1,metrics_index2"
-      streaming: true
+      streaming_eligible: true
       time_config:
         min_timestamp: "2025-01-01T00:00:00Z"
         max_timestamp: "2025-01-01T01:00:00Z"

@@ -8,6 +8,8 @@
 package org.opensearch.tsdb.query.aggregator;
 
 import org.opensearch.tsdb.core.chunk.ChunkIterator;
+import org.opensearch.tsdb.core.chunk.DedupIterator;
+import org.opensearch.tsdb.core.chunk.MergeIterator;
 import org.opensearch.tsdb.core.model.ByteLabels;
 import org.opensearch.tsdb.core.model.FloatSampleList;
 import org.opensearch.tsdb.core.model.Labels;
@@ -36,6 +38,16 @@ interface StreamingAggregationState {
     long getEstimatedMemoryUsage();
 
     boolean hasData();
+
+    /**
+     * Merge and deduplicate multiple chunk iterators.
+     * For LSI MemChunks with overlapping inner chunks, this prevents duplicate timestamps
+     * from being double-counted during aggregation.
+     */
+    static ChunkIterator mergeAndDedup(List<ChunkIterator> chunks) {
+        if (chunks.size() == 1) return chunks.get(0);
+        return new DedupIterator(new MergeIterator(chunks), DedupIterator.DuplicatePolicy.FIRST);
+    }
 }
 
 /**
@@ -145,9 +157,13 @@ class NoTagStreamingState implements StreamingAggregationState {
         // Skip label reading entirely for no-tag case - maximum performance optimization
         List<ChunkIterator> chunks = reader.chunksForDoc(docId, docValues);
 
-        for (ChunkIterator chunk : chunks) {
-            processChunk(chunk);
+        if (chunks.isEmpty()) {
+            return;
         }
+
+        // Merge and dedup to handle LSI MemChunks with overlapping inner chunks
+        ChunkIterator merged = StreamingAggregationState.mergeAndDedup(chunks);
+        processChunk(merged);
     }
 
     private void processChunk(ChunkIterator chunk) throws IOException {
@@ -238,11 +254,13 @@ class TagStreamingState implements StreamingAggregationState {
         // Get or create group arrays for this label combination
         GroupTimeArrays arrays = groupData.computeIfAbsent(groupLabels, k -> new GroupTimeArrays(timeArraySize, aggregationType));
 
-        // Process chunks for this group
+        // Merge and dedup to handle LSI MemChunks with overlapping inner chunks, then process
         List<ChunkIterator> chunks = reader.chunksForDoc(docId, docValues);
-        for (ChunkIterator chunk : chunks) {
-            processChunkForGroup(chunk, arrays);
+        if (chunks.isEmpty()) {
+            return;
         }
+        ChunkIterator merged = StreamingAggregationState.mergeAndDedup(chunks);
+        processChunkForGroup(merged, arrays);
     }
 
     private ByteLabels extractGroupLabels(Labels allLabels) {

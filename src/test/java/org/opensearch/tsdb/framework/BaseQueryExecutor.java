@@ -86,6 +86,17 @@ public abstract class BaseQueryExecutor {
                 }
                 validateErrorResponse(query.name(), query.expected().errorMessage(), e.getMessage());
             }
+
+            // If streaming_eligible, also run with streaming=true and validate identical results
+            if (query.isStreamingEligible() && STATUS_SUCCESS.equals(expectedStatus)) {
+                QueryConfig streamingQuery = query.withStreaming(true);
+                try {
+                    PromMatrixResponse streamingResponse = executeQuery(streamingQuery, streamingQuery.indices());
+                    validateResponse(streamingQuery, streamingResponse);
+                } catch (Exception e) {
+                    throw new AssertionError(streamingQuery.name() + ": streaming variant failed but non-streaming succeeded", e);
+                }
+            }
         }
     }
 

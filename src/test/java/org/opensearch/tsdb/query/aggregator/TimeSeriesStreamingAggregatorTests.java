@@ -236,17 +236,29 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
         long min = 1000L, max = 4000L, step = 1000L;
         TimeSeriesStreamingAggregator agg = createStreamingAggregator(StreamingAggregationType.MIN, null, min, max, step);
 
-        // Two chunks with overlapping timestamps
+        // Two documents with overlapping timestamps — min aggregation across documents
         TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
             min,
             max,
-            new long[][] { { 1000L, 2000L }, { 1000L, 2000L } },
-            new double[][] { { 10.0, 20.0 }, { 15.0, 5.0 } },
+            new long[][] { { 1000L, 2000L } },
+            new double[][] { { 10.0, 20.0 } },
             docId -> mock(Labels.class)
         );
 
         LeafBucketCollector collector = agg.getLeafCollector(readerCtx.context, mock(LeafBucketCollector.class));
         collector.collect(0, 0);
+
+        // Second document with different values at same timestamps
+        TSDBLeafReaderWithContext readerCtx2 = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L, 2000L } },
+            new double[][] { { 15.0, 5.0 } },
+            docId -> mock(Labels.class)
+        );
+
+        LeafBucketCollector collector2 = agg.getLeafCollector(readerCtx2.context, mock(LeafBucketCollector.class));
+        collector2.collect(0, 0);
 
         InternalAggregation[] results = agg.buildAggregations(new long[] { 0 });
         InternalTimeSeries ts = (InternalTimeSeries) results[0];
@@ -261,6 +273,8 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
 
         readerCtx.directoryReader.close();
         readerCtx.directory.close();
+        readerCtx2.directoryReader.close();
+        readerCtx2.directory.close();
         agg.close();
     }
 
@@ -268,16 +282,28 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
         long min = 1000L, max = 4000L, step = 1000L;
         TimeSeriesStreamingAggregator agg = createStreamingAggregator(StreamingAggregationType.MAX, null, min, max, step);
 
+        // Two documents with overlapping timestamps — max aggregation across documents
         TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
             min,
             max,
-            new long[][] { { 1000L, 2000L }, { 1000L, 2000L } },
-            new double[][] { { 10.0, 20.0 }, { 15.0, 5.0 } },
+            new long[][] { { 1000L, 2000L } },
+            new double[][] { { 10.0, 20.0 } },
             docId -> mock(Labels.class)
         );
 
         LeafBucketCollector collector = agg.getLeafCollector(readerCtx.context, mock(LeafBucketCollector.class));
         collector.collect(0, 0);
+
+        TSDBLeafReaderWithContext readerCtx2 = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L, 2000L } },
+            new double[][] { { 15.0, 5.0 } },
+            docId -> mock(Labels.class)
+        );
+
+        LeafBucketCollector collector2 = agg.getLeafCollector(readerCtx2.context, mock(LeafBucketCollector.class));
+        collector2.collect(0, 0);
 
         InternalAggregation[] results = agg.buildAggregations(new long[] { 0 });
         InternalTimeSeries ts = (InternalTimeSeries) results[0];
@@ -292,6 +318,8 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
 
         readerCtx.directoryReader.close();
         readerCtx.directory.close();
+        readerCtx2.directoryReader.close();
+        readerCtx2.directory.close();
         agg.close();
     }
 
@@ -299,17 +327,28 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
         long min = 1000L, max = 4000L, step = 1000L;
         TimeSeriesStreamingAggregator agg = createStreamingAggregator(StreamingAggregationType.AVG, null, min, max, step);
 
-        // Two chunks with overlapping timestamps to accumulate sum + count
+        // Two documents with overlapping timestamps to accumulate sum + count
         TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
             min,
             max,
-            new long[][] { { 1000L, 2000L }, { 1000L, 2000L } },
-            new double[][] { { 10.0, 20.0 }, { 30.0, 40.0 } },
+            new long[][] { { 1000L, 2000L } },
+            new double[][] { { 10.0, 20.0 } },
             docId -> mock(Labels.class)
         );
 
         LeafBucketCollector collector = agg.getLeafCollector(readerCtx.context, mock(LeafBucketCollector.class));
         collector.collect(0, 0);
+
+        TSDBLeafReaderWithContext readerCtx2 = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L, 2000L } },
+            new double[][] { { 30.0, 40.0 } },
+            docId -> mock(Labels.class)
+        );
+
+        LeafBucketCollector collector2 = agg.getLeafCollector(readerCtx2.context, mock(LeafBucketCollector.class));
+        collector2.collect(0, 0);
 
         InternalAggregation[] results = agg.buildAggregations(new long[] { 0 });
         InternalTimeSeries ts = (InternalTimeSeries) results[0];
@@ -325,6 +364,8 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
 
         readerCtx.directoryReader.close();
         readerCtx.directory.close();
+        readerCtx2.directoryReader.close();
+        readerCtx2.directory.close();
         agg.close();
     }
 
@@ -421,6 +462,117 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
 
     // ---- Tag-based aggregation data processing tests ----
 
+    /**
+     * Test that overlapping chunks within a single document are deduped (not double-counted).
+     * This simulates LSI MemChunks with overlapping inner chunks — the dedup iterator
+     * should keep only the first value for each timestamp.
+     */
+    public void testNoTagSumDedupOverlappingChunks() throws IOException {
+        long min = 1000L, max = 4000L, step = 1000L;
+        TimeSeriesStreamingAggregator agg = createStreamingAggregator(StreamingAggregationType.SUM, null, min, max, step);
+
+        // Two chunks with overlapping timestamps: both have t=1000 and t=2000
+        // Without dedup, SUM would double-count: 10+99=109 at t=1000, 20+88=108 at t=2000
+        // With dedup (FIRST policy), only first chunk's values are used: 10 at t=1000, 20 at t=2000
+        TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L, 2000L }, { 1000L, 2000L } },
+            new double[][] { { 10.0, 20.0 }, { 99.0, 88.0 } },
+            docId -> mock(Labels.class)
+        );
+
+        LeafBucketCollector collector = agg.getLeafCollector(readerCtx.context, mock(LeafBucketCollector.class));
+        collector.collect(0, 0);
+
+        InternalAggregation[] results = agg.buildAggregations(new long[] { 0 });
+        InternalTimeSeries ts = (InternalTimeSeries) results[0];
+        assertEquals(1, ts.getTimeSeries().size());
+
+        SampleList samples = ts.getTimeSeries().get(0).getSamples();
+        assertEquals(2, samples.size());
+        assertEquals(1000L, samples.getTimestamp(0));
+        assertEquals(10.0, samples.getValue(0), 0.001); // deduped: first chunk value only
+        assertEquals(2000L, samples.getTimestamp(1));
+        assertEquals(20.0, samples.getValue(1), 0.001); // deduped: first chunk value only
+
+        readerCtx.directoryReader.close();
+        readerCtx.directory.close();
+        agg.close();
+    }
+
+    /**
+     * Test that a single chunk does not get wrapped unnecessarily (mergeAndDedup fast path).
+     */
+    public void testNoTagSumSingleChunkNoDedup() throws IOException {
+        long min = 1000L, max = 4000L, step = 1000L;
+        TimeSeriesStreamingAggregator agg = createStreamingAggregator(StreamingAggregationType.SUM, null, min, max, step);
+
+        // Single chunk — mergeAndDedup should return it directly
+        TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L, 2000L, 3000L } },
+            new double[][] { { 10.0, 20.0, 30.0 } },
+            docId -> mock(Labels.class)
+        );
+
+        LeafBucketCollector collector = agg.getLeafCollector(readerCtx.context, mock(LeafBucketCollector.class));
+        collector.collect(0, 0);
+
+        InternalAggregation[] results = agg.buildAggregations(new long[] { 0 });
+        InternalTimeSeries ts = (InternalTimeSeries) results[0];
+        assertEquals(1, ts.getTimeSeries().size());
+
+        SampleList samples = ts.getTimeSeries().get(0).getSamples();
+        assertEquals(3, samples.size());
+        assertEquals(10.0, samples.getValue(0), 0.001);
+        assertEquals(20.0, samples.getValue(1), 0.001);
+        assertEquals(30.0, samples.getValue(2), 0.001);
+
+        readerCtx.directoryReader.close();
+        readerCtx.directory.close();
+        agg.close();
+    }
+
+    /**
+     * Test dedup with tag-based aggregation — overlapping chunks should be deduped per document.
+     */
+    public void testTagSumDedupOverlappingChunks() throws IOException {
+        long min = 1000L, max = 4000L, step = 1000L;
+        List<String> groupByTags = List.of("region");
+        TimeSeriesStreamingAggregator agg = createStreamingAggregator(StreamingAggregationType.SUM, groupByTags, min, max, step);
+
+        Labels mockLabels = mock(Labels.class);
+        when(mockLabels.has("region")).thenReturn(true);
+        when(mockLabels.get("region")).thenReturn("us");
+
+        // Two overlapping chunks — dedup should keep only first values
+        TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L, 2000L }, { 1000L, 2000L } },
+            new double[][] { { 10.0, 20.0 }, { 99.0, 88.0 } },
+            docId -> mockLabels
+        );
+
+        LeafBucketCollector collector = agg.getLeafCollector(readerCtx.context, mock(LeafBucketCollector.class));
+        collector.collect(0, 0);
+
+        InternalAggregation[] results = agg.buildAggregations(new long[] { 0 });
+        InternalTimeSeries ts = (InternalTimeSeries) results[0];
+        assertEquals(1, ts.getTimeSeries().size());
+
+        SampleList samples = ts.getTimeSeries().get(0).getSamples();
+        assertEquals(2, samples.size());
+        assertEquals(10.0, samples.getValue(0), 0.001); // deduped: first chunk value
+        assertEquals(20.0, samples.getValue(1), 0.001); // deduped: first chunk value
+
+        readerCtx.directoryReader.close();
+        readerCtx.directory.close();
+        agg.close();
+    }
+
     public void testTagSumAggregation() throws IOException {
         long min = 1000L, max = 4000L, step = 1000L;
         List<String> groupByTags = List.of("region");
@@ -466,16 +618,29 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
         when(mockLabels.has("region")).thenReturn(true);
         when(mockLabels.get("region")).thenReturn("us");
 
+        // First document
         TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
             min,
             max,
-            new long[][] { { 1000L }, { 1000L } },
-            new double[][] { { 10.0 }, { 30.0 } },
+            new long[][] { { 1000L } },
+            new double[][] { { 10.0 } },
             docId -> mockLabels
         );
 
         LeafBucketCollector collector = agg.getLeafCollector(readerCtx.context, mock(LeafBucketCollector.class));
         collector.collect(0, 0);
+
+        // Second document with same timestamp
+        TSDBLeafReaderWithContext readerCtx2 = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L } },
+            new double[][] { { 30.0 } },
+            docId -> mockLabels
+        );
+
+        LeafBucketCollector collector2 = agg.getLeafCollector(readerCtx2.context, mock(LeafBucketCollector.class));
+        collector2.collect(0, 0);
 
         InternalAggregation[] results = agg.buildAggregations(new long[] { 0 });
         InternalTimeSeries ts = (InternalTimeSeries) results[0];
@@ -489,6 +654,8 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
 
         readerCtx.directoryReader.close();
         readerCtx.directory.close();
+        readerCtx2.directoryReader.close();
+        readerCtx2.directory.close();
         agg.close();
     }
 
