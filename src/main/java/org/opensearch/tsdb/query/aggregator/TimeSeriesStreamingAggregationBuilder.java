@@ -181,6 +181,7 @@ public class TimeSeriesStreamingAggregationBuilder extends AbstractAggregationBu
     protected AggregatorFactory doBuild(QueryShardContext queryShardContext, AggregatorFactory parent, Builder subFactoriesBuilder)
         throws IOException {
         // Verify TSDB is enabled on this index
+        // TODO: Extract tsdbEnabled check to a shared base class (see also TimeSeriesUnfoldAggregationBuilder.doBuild())
         boolean tsdbEnabled = TSDBPlugin.TSDB_ENGINE_ENABLED.get(queryShardContext.getIndexSettings().getSettings());
         if (!tsdbEnabled) {
             throw new IllegalStateException(

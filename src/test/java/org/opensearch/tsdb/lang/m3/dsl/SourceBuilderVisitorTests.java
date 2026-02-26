@@ -1549,7 +1549,8 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
             1L,       // step - 1ms
             true,
             true,
-            null
+            null,
+            false     // streaming
         );
         SourceBuilderVisitor truncateVisitor = new SourceBuilderVisitor(truncateParams);
 

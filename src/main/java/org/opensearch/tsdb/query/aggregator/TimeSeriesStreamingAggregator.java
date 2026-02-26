@@ -83,8 +83,9 @@ public class TimeSeriesStreamingAggregator extends BucketsAggregator {
     // Streaming state per bucket
     private final Map<Long, StreamingAggregationState> bucketStates = new HashMap<>();
 
-    // Circuit breaker tracking
+    // Circuit breaker tracking — track previous memory per bucket to compute deltas
     private long circuitBreakerBytes = 0;
+    private final Map<Long, Long> lastStateMemoryByBucket = new HashMap<>();
 
     // Metrics tracking
     private int totalDocsProcessed = 0;
@@ -156,6 +157,8 @@ public class TimeSeriesStreamingAggregator extends BucketsAggregator {
 
     @Override
     public LeafBucketCollector getLeafCollector(LeafReaderContext ctx, LeafBucketCollector sub) throws IOException {
+        // TODO: Extract TSDBLeafReader unwrap + time range check to a shared base class
+        // (see also TimeSeriesUnfoldAggregator.getLeafCollector())
         // Check if this leaf reader can be pruned based on time range
         TSDBLeafReader tsdbLeafReader = TSDBLeafReader.unwrapLeafReader(ctx.reader());
         if (tsdbLeafReader == null) {
@@ -268,8 +271,14 @@ public class TimeSeriesStreamingAggregator extends BucketsAggregator {
             // Process document in streaming fashion
             state.processDocument(doc, tsdbDocValues, tsdbLeafReader);
 
-            // Track memory usage for circuit breaker
-            addCircuitBreakerBytes(state.getEstimatedMemoryUsage());
+            // Track memory usage for circuit breaker — pass only the delta, not the total
+            long currentMemory = state.getEstimatedMemoryUsage();
+            long previousMemory = lastStateMemoryByBucket.getOrDefault(bucket, 0L);
+            long delta = currentMemory - previousMemory;
+            if (delta > 0) {
+                addCircuitBreakerBytes(delta);
+            }
+            lastStateMemoryByBucket.put(bucket, currentMemory);
 
             // Track metrics
             boolean isLiveReader = tsdbLeafReader instanceof LiveSeriesIndexLeafReader;

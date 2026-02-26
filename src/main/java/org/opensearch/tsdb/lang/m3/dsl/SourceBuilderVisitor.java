@@ -368,6 +368,9 @@ public class SourceBuilderVisitor extends M3PlanVisitor<SourceBuilderVisitor.Com
             TSDBMetrics.incrementCounter(METRICS.pushdownRequestsTotal, 1, Tags.create().addTag("mode", "disabled"));
         }
 
+        // TODO: Move this to a proper optimizer pass in the SourceBuilder layer.
+        // No-op stripping (like RemoveEmptyStage after fetch) should happen as an optimization
+        // pass prior to building the SourceBuilder, not inline in the visit method.
         // removeEmpty right after fetch is a no-op — strip it to enable streaming optimization
         if (!unfoldStages.isEmpty() && unfoldStages.get(0) instanceof RemoveEmptyStage) {
             unfoldStages.remove(0);
@@ -906,6 +909,10 @@ public class SourceBuilderVisitor extends M3PlanVisitor<SourceBuilderVisitor.Com
 
     /**
      * Check if unfoldStages consists of exactly one supported streaming aggregation stage.
+     *
+     * TODO: Consider adding isStreamingEligible() / getStreamingAggregationType() to
+     * UnaryPipelineStage, or use a factory/registry pattern, instead of instanceof checks
+     * in the visitor.
      */
     private boolean isStreamingEligibleStages(List<UnaryPipelineStage> unfoldStages) {
         if (unfoldStages.size() != 1) {

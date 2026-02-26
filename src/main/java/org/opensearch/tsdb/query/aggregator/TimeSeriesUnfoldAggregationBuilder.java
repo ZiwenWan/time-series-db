@@ -316,6 +316,7 @@ public class TimeSeriesUnfoldAggregationBuilder extends AbstractAggregationBuild
     @Override
     protected AggregatorFactory doBuild(QueryShardContext queryShardContext, AggregatorFactory parent, Builder subFactoriesBuilder)
         throws IOException {
+        // TODO: Extract tsdbEnabled check to a shared base class (see also TimeSeriesStreamingAggregationBuilder.doBuild())
         boolean tsdbEnabled = TSDBPlugin.TSDB_ENGINE_ENABLED.get(queryShardContext.getIndexSettings().getSettings());
         if (!tsdbEnabled) {
             throw new IllegalStateException("Time Series Unfold Aggregator can only be used on indices where tsdb_engine.enabled is true");

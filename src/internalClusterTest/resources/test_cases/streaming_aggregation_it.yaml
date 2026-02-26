@@ -39,12 +39,12 @@ test_case:
         values: [null, 150, 140, 160, 130]
 
   queries:
-    # ==================== Streaming sum ====================
-    - name: "streaming_sum_global"
+    # ==================== Sum ====================
+    - name: "sum_global"
       type: "m3ql"
       query: "fetch __name__:request_count | sum"
       indices: "streaming_agg_test"
-      streaming: true
+      streaming_eligible: true
       time_config:
         min_timestamp: "now-50m"
         max_timestamp: "now"
@@ -55,27 +55,12 @@ test_case:
           - metric: {}
             values: [450, 680, 630, 720, 630]
 
-    # Verify same result without streaming
-    - name: "unfold_sum_global"
-      type: "m3ql"
-      query: "fetch __name__:request_count | sum"
-      indices: "streaming_agg_test"
-      time_config:
-        min_timestamp: "now-50m"
-        max_timestamp: "now"
-        step: "10m"
-      expected:
-        status: "success"
-        data:
-          - metric: {}
-            values: [450, 680, 630, 720, 630]
-
-    # ==================== Streaming min ====================
-    - name: "streaming_min_global"
+    # ==================== Min ====================
+    - name: "min_global"
       type: "m3ql"
       query: "fetch __name__:request_count | min"
       indices: "streaming_agg_test"
-      streaming: true
+      streaming_eligible: true
       time_config:
         min_timestamp: "now-50m"
         max_timestamp: "now"
@@ -86,12 +71,12 @@ test_case:
           - metric: {}
             values: [50, 80, 60, 70, 90]
 
-    # ==================== Streaming max ====================
-    - name: "streaming_max_global"
+    # ==================== Max ====================
+    - name: "max_global"
       type: "m3ql"
       query: "fetch __name__:request_count | max"
       indices: "streaming_agg_test"
-      streaming: true
+      streaming_eligible: true
       time_config:
         min_timestamp: "now-50m"
         max_timestamp: "now"
@@ -102,12 +87,12 @@ test_case:
           - metric: {}
             values: [300, 250, 280, 310, 290]
 
-    # ==================== Streaming avg ====================
-    - name: "streaming_avg_global"
+    # ==================== Avg ====================
+    - name: "avg_global"
       type: "m3ql"
       query: "fetch __name__:request_count | avg"
       indices: "streaming_agg_test"
-      streaming: true
+      streaming_eligible: true
       time_config:
         min_timestamp: "now-50m"
         max_timestamp: "now"
