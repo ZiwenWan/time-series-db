@@ -151,10 +151,13 @@ class NoTagStreamingState implements StreamingAggregationState {
             return;
         }
 
-        // Always dedup to handle LSI MemChunks with overlapping inner chunks or
-        // single chunks with duplicate consecutive timestamps
-        ChunkIterator base = chunks.size() == 1 ? chunks.get(0) : new MergeIterator(chunks);
-        ChunkIterator it = new DedupIterator(base, DedupIterator.DuplicatePolicy.FIRST);
+        ChunkIterator it;
+        if (chunks.size() == 1) {
+            it = chunks.getFirst();
+        } else {
+            // Dedup is needed for LSI MemChunks whose inner chunks may contain overlapping timestamps
+            it = new DedupIterator(new MergeIterator(chunks), DedupIterator.DuplicatePolicy.FIRST);
+        }
         processChunk(it);
     }
 
@@ -246,13 +249,18 @@ class TagStreamingState implements StreamingAggregationState {
         // Get or create group arrays for this label combination
         GroupTimeArrays arrays = groupData.computeIfAbsent(groupLabels, k -> new GroupTimeArrays(timeArraySize, aggregationType));
 
-        // Always dedup to handle LSI MemChunks with overlapping inner chunks
+        // Dedup to handle LSI MemChunks with overlapping inner chunks
         List<ChunkIterator> chunks = reader.chunksForDoc(docId, docValues);
         if (chunks.isEmpty()) {
             return;
         }
-        ChunkIterator base = chunks.size() == 1 ? chunks.get(0) : new MergeIterator(chunks);
-        ChunkIterator it = new DedupIterator(base, DedupIterator.DuplicatePolicy.FIRST);
+        ChunkIterator it;
+        if (chunks.size() == 1) {
+            it = chunks.getFirst();
+        } else {
+            // Dedup is needed for LSI MemChunks whose inner chunks may contain overlapping timestamps
+            it = new DedupIterator(new MergeIterator(chunks), DedupIterator.DuplicatePolicy.FIRST);
+        }
         processChunkForGroup(it, arrays);
     }
 

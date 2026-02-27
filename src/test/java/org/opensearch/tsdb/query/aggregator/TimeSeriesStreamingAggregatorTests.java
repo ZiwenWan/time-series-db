@@ -460,6 +460,182 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
         agg.close();
     }
 
+    // ---- LSI MemChunk inner chunk dedup tests ----
+    // LSI MemChunks have multiple inner chunks whose timestamps partially overlap.
+    // chunksForDoc returns these as separate ChunkIterators. The streaming aggregator
+    // must merge+dedup them (matching unfold aggregator behavior).
+
+    /**
+     * Simulate LSI MemChunk with partially overlapping inner chunks.
+     * Inner chunk 1: [1000, 2000, 3000], Inner chunk 2: [2000, 3000, 4000]
+     * After MergeIterator+DedupIterator(FIRST): [1000->10, 2000->20, 3000->30, 4000->70]
+     * (overlapping timestamps 2000 and 3000 keep first chunk's values)
+     */
+    public void testNoTagSumLSIPartialOverlap() throws IOException {
+        long min = 1000L, max = 5000L, step = 1000L;
+        TimeSeriesStreamingAggregator agg = createStreamingAggregator(StreamingAggregationType.SUM, null, min, max, step);
+
+        TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L, 2000L, 3000L }, { 2000L, 3000L, 4000L } },
+            new double[][] { { 10.0, 20.0, 30.0 }, { 55.0, 66.0, 70.0 } },
+            docId -> mock(Labels.class)
+        );
+
+        LeafBucketCollector collector = agg.getLeafCollector(readerCtx.context, mock(LeafBucketCollector.class));
+        collector.collect(0, 0);
+
+        InternalAggregation[] results = agg.buildAggregations(new long[] { 0 });
+        InternalTimeSeries ts = (InternalTimeSeries) results[0];
+        assertEquals(1, ts.getTimeSeries().size());
+
+        SampleList samples = ts.getTimeSeries().get(0).getSamples();
+        assertEquals(4, samples.size());
+        assertEquals(1000L, samples.getTimestamp(0));
+        assertEquals(10.0, samples.getValue(0), 0.001); // only in chunk 1
+        assertEquals(2000L, samples.getTimestamp(1));
+        assertEquals(20.0, samples.getValue(1), 0.001); // overlap: first chunk wins
+        assertEquals(3000L, samples.getTimestamp(2));
+        assertEquals(30.0, samples.getValue(2), 0.001); // overlap: first chunk wins
+        assertEquals(4000L, samples.getTimestamp(3));
+        assertEquals(70.0, samples.getValue(3), 0.001); // only in chunk 2
+
+        readerCtx.directoryReader.close();
+        readerCtx.directory.close();
+        agg.close();
+    }
+
+    /**
+     * Simulate LSI MemChunk dedup with SUM aggregation across two documents.
+     * Doc 1: inner chunks [1000->10, 2000->20] and [2000->99] (deduped to [1000->10, 2000->20])
+     * Doc 2: single chunk [1000->5, 2000->15] (no dedup needed)
+     * After SUM across docs: [1000->15, 2000->35]
+     */
+    public void testNoTagSumLSIDedupThenAggregateAcrossDocuments() throws IOException {
+        long min = 1000L, max = 4000L, step = 1000L;
+        TimeSeriesStreamingAggregator agg = createStreamingAggregator(StreamingAggregationType.SUM, null, min, max, step);
+
+        // Doc 1: two overlapping inner chunks (LSI MemChunk scenario)
+        TSDBLeafReaderWithContext readerCtx1 = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L, 2000L }, { 2000L } },
+            new double[][] { { 10.0, 20.0 }, { 99.0 } },
+            docId -> mock(Labels.class)
+        );
+
+        LeafBucketCollector collector1 = agg.getLeafCollector(readerCtx1.context, mock(LeafBucketCollector.class));
+        collector1.collect(0, 0);
+
+        // Doc 2: single chunk (no dedup needed)
+        TSDBLeafReaderWithContext readerCtx2 = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L, 2000L } },
+            new double[][] { { 5.0, 15.0 } },
+            docId -> mock(Labels.class)
+        );
+
+        LeafBucketCollector collector2 = agg.getLeafCollector(readerCtx2.context, mock(LeafBucketCollector.class));
+        collector2.collect(0, 0);
+
+        InternalAggregation[] results = agg.buildAggregations(new long[] { 0 });
+        InternalTimeSeries ts = (InternalTimeSeries) results[0];
+        assertEquals(1, ts.getTimeSeries().size());
+
+        SampleList samples = ts.getTimeSeries().get(0).getSamples();
+        assertEquals(2, samples.size());
+        assertEquals(1000L, samples.getTimestamp(0));
+        assertEquals(15.0, samples.getValue(0), 0.001); // 10 (deduped doc1) + 5 (doc2)
+        assertEquals(2000L, samples.getTimestamp(1));
+        assertEquals(35.0, samples.getValue(1), 0.001); // 20 (deduped doc1, not 99) + 15 (doc2)
+
+        readerCtx1.directoryReader.close();
+        readerCtx1.directory.close();
+        readerCtx2.directoryReader.close();
+        readerCtx2.directory.close();
+        agg.close();
+    }
+
+    /**
+     * Simulate LSI MemChunk dedup with tag-based aggregation.
+     * Verifies dedup happens per document before group aggregation.
+     */
+    public void testTagSumLSIDedupWithGrouping() throws IOException {
+        long min = 1000L, max = 4000L, step = 1000L;
+        List<String> groupByTags = List.of("region");
+        TimeSeriesStreamingAggregator agg = createStreamingAggregator(StreamingAggregationType.SUM, groupByTags, min, max, step);
+
+        Labels usLabels = mock(Labels.class);
+        when(usLabels.has("region")).thenReturn(true);
+        when(usLabels.get("region")).thenReturn("us");
+
+        // Doc with two overlapping inner chunks (LSI MemChunk)
+        TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L, 2000L }, { 1000L, 2000L } },
+            new double[][] { { 10.0, 20.0 }, { 99.0, 88.0 } },
+            docId -> usLabels
+        );
+
+        LeafBucketCollector collector = agg.getLeafCollector(readerCtx.context, mock(LeafBucketCollector.class));
+        collector.collect(0, 0);
+
+        InternalAggregation[] results = agg.buildAggregations(new long[] { 0 });
+        InternalTimeSeries ts = (InternalTimeSeries) results[0];
+        assertEquals(1, ts.getTimeSeries().size());
+
+        SampleList samples = ts.getTimeSeries().get(0).getSamples();
+        assertEquals(2, samples.size());
+        assertEquals(10.0, samples.getValue(0), 0.001); // deduped: first chunk only
+        assertEquals(20.0, samples.getValue(1), 0.001); // deduped: first chunk only
+
+        readerCtx.directoryReader.close();
+        readerCtx.directory.close();
+        agg.close();
+    }
+
+    /**
+     * Simulate LSI MemChunk with three inner chunks (progressive overlap).
+     * Chunk 1: [1000->1], Chunk 2: [1000->2, 2000->20], Chunk 3: [2000->3, 3000->30]
+     * MergeIterator produces sorted: [1000->1, 1000->2, 2000->20, 2000->3, 3000->30]
+     * DedupIterator(FIRST) keeps: [1000->1, 2000->20, 3000->30]
+     */
+    public void testNoTagSumLSIThreeInnerChunks() throws IOException {
+        long min = 1000L, max = 4000L, step = 1000L;
+        TimeSeriesStreamingAggregator agg = createStreamingAggregator(StreamingAggregationType.SUM, null, min, max, step);
+
+        TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L }, { 1000L, 2000L }, { 2000L, 3000L } },
+            new double[][] { { 1.0 }, { 2.0, 20.0 }, { 3.0, 30.0 } },
+            docId -> mock(Labels.class)
+        );
+
+        LeafBucketCollector collector = agg.getLeafCollector(readerCtx.context, mock(LeafBucketCollector.class));
+        collector.collect(0, 0);
+
+        InternalAggregation[] results = agg.buildAggregations(new long[] { 0 });
+        InternalTimeSeries ts = (InternalTimeSeries) results[0];
+        assertEquals(1, ts.getTimeSeries().size());
+
+        SampleList samples = ts.getTimeSeries().get(0).getSamples();
+        assertEquals(3, samples.size());
+        assertEquals(1000L, samples.getTimestamp(0));
+        assertEquals(1.0, samples.getValue(0), 0.001); // first chunk wins for t=1000
+        assertEquals(2000L, samples.getTimestamp(1));
+        assertEquals(20.0, samples.getValue(1), 0.001); // chunk 2 wins for t=2000 (appears before chunk 3)
+        assertEquals(3000L, samples.getTimestamp(2));
+        assertEquals(30.0, samples.getValue(2), 0.001); // only in chunk 3
+
+        readerCtx.directoryReader.close();
+        readerCtx.directory.close();
+        agg.close();
+    }
+
     // ---- Tag-based aggregation data processing tests ----
 
     /**
@@ -502,7 +678,8 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
     }
 
     /**
-     * Test that a single chunk does not get wrapped unnecessarily (mergeAndDedup fast path).
+     * Test that a single chunk does not get wrapped with DedupIterator (matching unfold behavior).
+     * Single chunks are passed through directly.
      */
     public void testNoTagSumSingleChunkNoDedup() throws IOException {
         long min = 1000L, max = 4000L, step = 1000L;
