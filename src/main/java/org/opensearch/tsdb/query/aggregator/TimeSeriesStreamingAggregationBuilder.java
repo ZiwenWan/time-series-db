@@ -12,12 +12,10 @@ import org.opensearch.core.common.io.stream.StreamOutput;
 import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.core.xcontent.XContentParser;
 import org.opensearch.index.query.QueryShardContext;
-import org.opensearch.search.aggregations.AbstractAggregationBuilder;
 import org.opensearch.search.aggregations.AggregationBuilder;
 import org.opensearch.search.aggregations.AggregatorFactories.Builder;
 import org.opensearch.search.aggregations.AggregatorFactory;
 import org.opensearch.search.aggregations.support.ValuesSourceRegistry;
-import org.opensearch.tsdb.TSDBPlugin;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -65,16 +63,13 @@ import java.util.Objects;
  * When enabled, eligible queries will use this builder instead of the standard
  * TimeSeriesUnfoldAggregator.</p>
  */
-public class TimeSeriesStreamingAggregationBuilder extends AbstractAggregationBuilder<TimeSeriesStreamingAggregationBuilder> {
+public class TimeSeriesStreamingAggregationBuilder extends AbstractTimeSeriesAggregationBuilder<TimeSeriesStreamingAggregationBuilder> {
     /** The name of the aggregation type */
     public static final String NAME = "time_series_streaming";
 
-    // Core aggregation parameters
+    // Streaming-specific parameters
     private final StreamingAggregationType aggregationType;
     private final List<String> groupByTags;
-    private final long minTimestamp;
-    private final long maxTimestamp;
-    private final long step;
 
     /**
      * Create a time series streaming aggregation builder.
@@ -95,25 +90,9 @@ public class TimeSeriesStreamingAggregationBuilder extends AbstractAggregationBu
         long maxTimestamp,
         long step
     ) {
-        super(name);
-
-        // Validate time range
-        if (maxTimestamp <= minTimestamp) {
-            throw new IllegalArgumentException(
-                "maxTimestamp must be greater than minTimestamp (minTimestamp=" + minTimestamp + ", maxTimestamp=" + maxTimestamp + ")"
-            );
-        }
-
-        // Validate step size
-        if (step <= 0) {
-            throw new IllegalArgumentException("step must be positive, got: " + step);
-        }
-
+        super(name, minTimestamp, maxTimestamp, step);
         this.aggregationType = Objects.requireNonNull(aggregationType, "aggregationType must not be null");
         this.groupByTags = groupByTags;
-        this.minTimestamp = minTimestamp;
-        this.maxTimestamp = maxTimestamp;
-        this.step = step;
     }
 
     /**
@@ -130,9 +109,7 @@ public class TimeSeriesStreamingAggregationBuilder extends AbstractAggregationBu
         boolean hasGroupByTags = in.readBoolean();
         this.groupByTags = hasGroupByTags ? in.readStringList() : null;
 
-        this.minTimestamp = in.readLong();
-        this.maxTimestamp = in.readLong();
-        this.step = in.readLong();
+        readTimeRange(in);
     }
 
     /**
@@ -150,9 +127,6 @@ public class TimeSeriesStreamingAggregationBuilder extends AbstractAggregationBu
         super(clone, factoriesBuilder, metadata);
         this.aggregationType = clone.aggregationType;
         this.groupByTags = clone.groupByTags;
-        this.minTimestamp = clone.minTimestamp;
-        this.maxTimestamp = clone.maxTimestamp;
-        this.step = clone.step;
     }
 
     @Override
@@ -167,9 +141,7 @@ public class TimeSeriesStreamingAggregationBuilder extends AbstractAggregationBu
             out.writeBoolean(false);
         }
 
-        out.writeLong(minTimestamp);
-        out.writeLong(maxTimestamp);
-        out.writeLong(step);
+        writeTimeRange(out);
     }
 
     @Override
@@ -180,14 +152,7 @@ public class TimeSeriesStreamingAggregationBuilder extends AbstractAggregationBu
     @Override
     protected AggregatorFactory doBuild(QueryShardContext queryShardContext, AggregatorFactory parent, Builder subFactoriesBuilder)
         throws IOException {
-        // Verify TSDB is enabled on this index
-        // TODO: Extract tsdbEnabled check to a shared base class (see also TimeSeriesUnfoldAggregationBuilder.doBuild())
-        boolean tsdbEnabled = TSDBPlugin.TSDB_ENGINE_ENABLED.get(queryShardContext.getIndexSettings().getSettings());
-        if (!tsdbEnabled) {
-            throw new IllegalStateException(
-                "Time Series Streaming Aggregator can only be used on indices where index.tsdb_engine.enabled is true"
-            );
-        }
+        validateTsdbEnabled(queryShardContext);
 
         return new TimeSeriesStreamingAggregatorFactory(
             name,
@@ -201,11 +166,6 @@ public class TimeSeriesStreamingAggregationBuilder extends AbstractAggregationBu
             maxTimestamp,
             step
         );
-    }
-
-    @Override
-    public BucketCardinality bucketCardinality() {
-        return BucketCardinality.MANY;
     }
 
     @Override
@@ -310,11 +270,7 @@ public class TimeSeriesStreamingAggregationBuilder extends AbstractAggregationBu
         }
 
         TimeSeriesStreamingAggregationBuilder that = (TimeSeriesStreamingAggregationBuilder) obj;
-        return aggregationType == that.aggregationType
-            && Objects.equals(groupByTags, that.groupByTags)
-            && minTimestamp == that.minTimestamp
-            && maxTimestamp == that.maxTimestamp
-            && step == that.step;
+        return aggregationType == that.aggregationType && Objects.equals(groupByTags, that.groupByTags) && timeRangeEquals(that);
     }
 
     @Override
@@ -322,9 +278,7 @@ public class TimeSeriesStreamingAggregationBuilder extends AbstractAggregationBu
         int result = super.hashCode();
         result = 31 * result + Objects.hashCode(aggregationType);
         result = 31 * result + Objects.hashCode(groupByTags);
-        result = 31 * result + Long.hashCode(minTimestamp);
-        result = 31 * result + Long.hashCode(maxTimestamp);
-        result = 31 * result + Long.hashCode(step);
+        result = 31 * result + timeRangeHashCode();
         return result;
     }
 
@@ -335,18 +289,6 @@ public class TimeSeriesStreamingAggregationBuilder extends AbstractAggregationBu
 
     public List<String> getGroupByTags() {
         return groupByTags;
-    }
-
-    public long getMinTimestamp() {
-        return minTimestamp;
-    }
-
-    public long getMaxTimestamp() {
-        return maxTimestamp;
-    }
-
-    public long getStep() {
-        return step;
     }
 
     /**

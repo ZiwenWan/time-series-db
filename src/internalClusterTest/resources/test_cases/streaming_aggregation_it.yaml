@@ -44,7 +44,7 @@ test_case:
       type: "m3ql"
       query: "fetch __name__:request_count | sum"
       indices: "streaming_agg_test"
-      streaming_eligible: true
+
       time_config:
         min_timestamp: "now-50m"
         max_timestamp: "now"
@@ -60,7 +60,7 @@ test_case:
       type: "m3ql"
       query: "fetch __name__:request_count | min"
       indices: "streaming_agg_test"
-      streaming_eligible: true
+
       time_config:
         min_timestamp: "now-50m"
         max_timestamp: "now"
@@ -76,7 +76,7 @@ test_case:
       type: "m3ql"
       query: "fetch __name__:request_count | max"
       indices: "streaming_agg_test"
-      streaming_eligible: true
+
       time_config:
         min_timestamp: "now-50m"
         max_timestamp: "now"
@@ -92,7 +92,7 @@ test_case:
       type: "m3ql"
       query: "fetch __name__:request_count | avg"
       indices: "streaming_agg_test"
-      streaming_eligible: true
+
       time_config:
         min_timestamp: "now-50m"
         max_timestamp: "now"

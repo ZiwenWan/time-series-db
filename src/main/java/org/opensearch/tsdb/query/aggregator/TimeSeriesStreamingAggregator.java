@@ -8,8 +8,10 @@
 package org.opensearch.tsdb.query.aggregator;
 
 import org.apache.lucene.index.LeafReaderContext;
+import org.apache.lucene.util.RamUsageEstimator;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.message.ParameterizedMessage;
 import org.opensearch.core.common.breaker.CircuitBreakingException;
 import org.opensearch.search.aggregations.Aggregator;
 import org.opensearch.search.aggregations.AggregatorFactories;
@@ -23,6 +25,7 @@ import org.opensearch.tsdb.core.index.live.LiveSeriesIndexLeafReader;
 import org.opensearch.tsdb.core.reader.TSDBDocValues;
 import org.opensearch.tsdb.core.reader.TSDBLeafReader;
 import org.opensearch.tsdb.metrics.TSDBMetrics;
+import org.opensearch.tsdb.query.breaker.CircuitBreakerBatcher;
 
 import org.opensearch.tsdb.lang.m3.stage.AvgStage;
 import org.opensearch.tsdb.lang.m3.stage.MaxStage;
@@ -34,6 +37,7 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -85,7 +89,11 @@ public class TimeSeriesStreamingAggregator extends BucketsAggregator {
 
     // Circuit breaker tracking — track previous memory per bucket to compute deltas
     private long circuitBreakerBytes = 0;
+    private long maxCircuitBreakerBytes = 0;
     private final Map<Long, Long> lastStateMemoryByBucket = new HashMap<>();
+
+    /** Batches circuit breaker updates at {@link CircuitBreakerBatcher#BATCH_THRESHOLD_BYTES} (5 MB). */
+    private final CircuitBreakerBatcher circuitBreakerBatcher;
 
     // Metrics tracking
     private int totalDocsProcessed = 0;
@@ -128,6 +136,7 @@ public class TimeSeriesStreamingAggregator extends BucketsAggregator {
         this.minTimestamp = minTimestamp;
         this.maxTimestamp = maxTimestamp;
         this.step = step;
+        this.circuitBreakerBatcher = new CircuitBreakerBatcher(this::commitToCircuitBreaker);
 
         // Pre-calculate array size for efficient memory allocation
         this.timeArraySize = calculateTimeArraySize(minTimestamp, maxTimestamp, step);
@@ -174,6 +183,9 @@ public class TimeSeriesStreamingAggregator extends BucketsAggregator {
 
     @Override
     public InternalAggregation[] buildAggregations(long[] bucketOrds) throws IOException {
+        // Flush pending circuit breaker bytes before building results
+        circuitBreakerBatcher.flush();
+
         InternalAggregation[] results = new InternalAggregation[bucketOrds.length];
 
         // Create the reduce stage that matches our streaming aggregation type,
@@ -218,18 +230,58 @@ public class TimeSeriesStreamingAggregator extends BucketsAggregator {
     }
 
     /**
-     * Track memory allocation with circuit breaker.
+     * Track memory allocation with batching via {@link CircuitBreakerBatcher}.
      */
-    private void addCircuitBreakerBytes(long bytes) {
+    private void trackCircuitBreakerBytes(long bytes) {
+        circuitBreakerBatcher.accept(bytes);
+    }
+
+    /**
+     * Commit bytes directly to the parent's circuit breaker.
+     * Called by {@link CircuitBreakerBatcher} when the batch threshold is exceeded.
+     */
+    private void commitToCircuitBreaker(long bytes) {
         if (bytes > 0) {
             try {
                 addRequestCircuitBreakerBytes(bytes);
                 circuitBreakerBytes += bytes;
+                maxCircuitBreakerBytes = Math.max(maxCircuitBreakerBytes, circuitBreakerBytes);
             } catch (CircuitBreakingException e) {
-                // Increment circuit breaker trips counter
+                logger.warn(
+                    "Circuit breaker tripped in streaming aggregator '{}': limit={} MiB, bytes={}, total={}, "
+                        + "timeRange=[{}, {}], step={}, type={}",
+                    name(),
+                    String.format(Locale.ROOT, "%.2f", e.getByteLimit() / (1024.0 * 1024.0)),
+                    bytes,
+                    circuitBreakerBytes,
+                    minTimestamp,
+                    maxTimestamp,
+                    step,
+                    aggregationType.getDisplayName()
+                );
                 TSDBMetrics.incrementCounter(TSDBMetrics.AGGREGATION.circuitBreakerTrips, 1);
                 throw e;
             }
+        }
+    }
+
+    @Override
+    public void doClose() {
+        // Flush any remaining pending circuit breaker bytes
+        circuitBreakerBatcher.flush();
+
+        logger.debug(
+            () -> new ParameterizedMessage(
+                "Closing streaming aggregator '{}': total circuit breaker bytes tracked={}, peak={}",
+                name(),
+                RamUsageEstimator.humanReadableUnits(circuitBreakerBytes),
+                RamUsageEstimator.humanReadableUnits(maxCircuitBreakerBytes)
+            )
+        );
+
+        // Record peak circuit breaker usage metric
+        if (maxCircuitBreakerBytes > 0) {
+            TSDBMetrics.recordHistogram(TSDBMetrics.AGGREGATION.circuitBreakerMiB, maxCircuitBreakerBytes / (1024.0 * 1024.0));
         }
     }
 
@@ -276,7 +328,7 @@ public class TimeSeriesStreamingAggregator extends BucketsAggregator {
             long previousMemory = lastStateMemoryByBucket.getOrDefault(bucket, 0L);
             long delta = currentMemory - previousMemory;
             if (delta > 0) {
-                addCircuitBreakerBytes(delta);
+                trackCircuitBreakerBytes(delta);
             }
             lastStateMemoryByBucket.put(bucket, currentMemory);
 

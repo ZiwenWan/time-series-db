@@ -87,8 +87,9 @@ public abstract class BaseQueryExecutor {
                 validateErrorResponse(query.name(), query.expected().errorMessage(), e.getMessage());
             }
 
-            // If streaming_eligible, also run with streaming=true and validate identical results
-            if (query.isStreamingEligible() && STATUS_SUCCESS.equals(expectedStatus)) {
+            // For every success query that isn't already streaming, also run with streaming=true
+            // and validate identical results. Non-eligible queries silently fall back to unfold.
+            if (!query.isStreaming() && STATUS_SUCCESS.equals(expectedStatus)) {
                 QueryConfig streamingQuery = query.withStreaming(true);
                 try {
                     PromMatrixResponse streamingResponse = executeQuery(streamingQuery, streamingQuery.indices());
