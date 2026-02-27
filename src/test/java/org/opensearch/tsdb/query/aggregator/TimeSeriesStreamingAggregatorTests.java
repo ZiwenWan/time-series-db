@@ -809,10 +809,14 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
 
         LeafBucketCollector collector = agg.getLeafCollector(readerCtx.context, mock(LeafBucketCollector.class));
 
-        // Arm the breaker after construction, so addCircuitBreakerBytes trips
+        // Collect a document — bytes are batched, not yet committed to the breaker
+        collector.collect(0, 0);
+
+        // Arm the breaker after collection so the flush in buildAggregations trips it
         armedBreaker.arm();
 
-        expectThrows(CircuitBreakingException.class, () -> collector.collect(0, 0));
+        // buildAggregations flushes the batcher, which commits to the armed breaker and trips
+        expectThrows(CircuitBreakingException.class, () -> agg.buildAggregations(new long[] { 0 }));
 
         readerCtx.directoryReader.close();
         readerCtx.directory.close();

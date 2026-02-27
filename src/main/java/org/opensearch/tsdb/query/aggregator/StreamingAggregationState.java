@@ -38,16 +38,6 @@ interface StreamingAggregationState {
     long getEstimatedMemoryUsage();
 
     boolean hasData();
-
-    /**
-     * Merge and deduplicate multiple chunk iterators.
-     * For LSI MemChunks with overlapping inner chunks, this prevents duplicate timestamps
-     * from being double-counted during aggregation.
-     */
-    static ChunkIterator mergeAndDedup(List<ChunkIterator> chunks) {
-        if (chunks.size() == 1) return chunks.get(0);
-        return new DedupIterator(new MergeIterator(chunks), DedupIterator.DuplicatePolicy.FIRST);
-    }
 }
 
 /**
@@ -161,9 +151,11 @@ class NoTagStreamingState implements StreamingAggregationState {
             return;
         }
 
-        // Merge and dedup to handle LSI MemChunks with overlapping inner chunks
-        ChunkIterator merged = StreamingAggregationState.mergeAndDedup(chunks);
-        processChunk(merged);
+        // Always dedup to handle LSI MemChunks with overlapping inner chunks or
+        // single chunks with duplicate consecutive timestamps
+        ChunkIterator base = chunks.size() == 1 ? chunks.get(0) : new MergeIterator(chunks);
+        ChunkIterator it = new DedupIterator(base, DedupIterator.DuplicatePolicy.FIRST);
+        processChunk(it);
     }
 
     private void processChunk(ChunkIterator chunk) throws IOException {
@@ -254,13 +246,14 @@ class TagStreamingState implements StreamingAggregationState {
         // Get or create group arrays for this label combination
         GroupTimeArrays arrays = groupData.computeIfAbsent(groupLabels, k -> new GroupTimeArrays(timeArraySize, aggregationType));
 
-        // Merge and dedup to handle LSI MemChunks with overlapping inner chunks, then process
+        // Always dedup to handle LSI MemChunks with overlapping inner chunks
         List<ChunkIterator> chunks = reader.chunksForDoc(docId, docValues);
         if (chunks.isEmpty()) {
             return;
         }
-        ChunkIterator merged = StreamingAggregationState.mergeAndDedup(chunks);
-        processChunkForGroup(merged, arrays);
+        ChunkIterator base = chunks.size() == 1 ? chunks.get(0) : new MergeIterator(chunks);
+        ChunkIterator it = new DedupIterator(base, DedupIterator.DuplicatePolicy.FIRST);
+        processChunkForGroup(it, arrays);
     }
 
     private ByteLabels extractGroupLabels(Labels allLabels) {

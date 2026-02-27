@@ -22,8 +22,8 @@ import org.opensearch.tsdb.query.rest.ResolvedPartitions;
  * cluster-qualified index patterns (e.g., "cluster_a:metrics,cluster_b:metrics").
  * The optional {@code ccs_minimize_roundtrips} field controls CCS optimization behavior.
  *
- * <p>When {@code streaming_eligible} is true, the test framework will automatically run
- * the query both with and without streaming, verifying identical results.
+ * <p>The test framework automatically runs every success query with both streaming
+ * enabled and disabled, verifying identical results.
  *
  * <h3>CCS Query Example:</h3>
  * <pre>{@code
@@ -46,7 +46,6 @@ import org.opensearch.tsdb.query.rest.ResolvedPartitions;
  * @param indices Target indices (comma-separated, may include cluster prefixes)
  * @param disablePushdown Optional flag to disable query pushdown
  * @param streaming Optional flag to enable streaming aggregation
- * @param streamingEligible Optional flag to auto-run query with and without streaming
  * @param ccsMinimizeRoundtrips Optional CCS minimize roundtrips setting (default: true)
  * @param resolvedPartitions Optional pre-resolved partitions
  * @param expected Expected response for validation
@@ -54,7 +53,7 @@ import org.opensearch.tsdb.query.rest.ResolvedPartitions;
 public record QueryConfig(@JsonProperty("name") String name, @JsonProperty("type") QueryType type, @JsonProperty("query") String query,
     @JsonProperty("time_config") TimeConfig config, @JsonProperty("indices") String indices,
     @JsonProperty("disable_pushdown") Boolean disablePushdown, @JsonProperty("streaming") Boolean streaming,
-    @JsonProperty("streaming_eligible") Boolean streamingEligible, @JsonProperty("ccs_minimize_roundtrips") Boolean ccsMinimizeRoundtrips,
+    @JsonProperty("ccs_minimize_roundtrips") Boolean ccsMinimizeRoundtrips,
     @JsonProperty("resolved_partitions") @JsonDeserialize(using = ResolvedPartitionsYamlAdapter.Deserializer.class) ResolvedPartitions resolvedPartitions,
     @JsonProperty("expected") ExpectedResponse expected) {
 
@@ -73,15 +72,7 @@ public record QueryConfig(@JsonProperty("name") String name, @JsonProperty("type
     }
 
     /**
-     * Get the streaming eligible flag, defaulting to false if not specified.
-     * When true, the framework auto-runs this query with streaming=true and validates identical results.
-     */
-    public boolean isStreamingEligible() {
-        return streamingEligible != null && streamingEligible;
-    }
-
-    /**
-     * Create a copy of this QueryConfig with streaming toggled.
+     * Create a copy of this QueryConfig with streaming enabled.
      */
     public QueryConfig withStreaming(boolean streamingEnabled) {
         return new QueryConfig(
@@ -92,7 +83,6 @@ public record QueryConfig(@JsonProperty("name") String name, @JsonProperty("type
             indices,
             disablePushdown,
             streamingEnabled,
-            null, // don't recurse streaming_eligible
             ccsMinimizeRoundtrips,
             resolvedPartitions,
             expected

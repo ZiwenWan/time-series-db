@@ -372,9 +372,9 @@ public class SourceBuilderVisitor extends M3PlanVisitor<SourceBuilderVisitor.Com
             TSDBMetrics.incrementCounter(METRICS.pushdownRequestsTotal, 1, Tags.create().addTag("mode", "disabled"));
         }
 
-        // TODO: Move this to a proper optimizer pass in the SourceBuilder layer.
-        // No-op stripping (like RemoveEmptyStage after fetch) should happen as an optimization
-        // pass prior to building the SourceBuilder, not inline in the visit method.
+        // TODO: Move this to a proper optimizer pass (e.g., a PlanNode optimization pass).
+        // No-op stripping (like RemoveEmptyStage after fetch) should happen as a separate
+        // optimization step, not inline in the visit method.
         // removeEmpty right after fetch is a no-op — strip it to enable streaming optimization
         if (!unfoldStages.isEmpty() && unfoldStages.get(0) instanceof RemoveEmptyStage) {
             unfoldStages.remove(0);
