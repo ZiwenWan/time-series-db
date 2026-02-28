@@ -35,8 +35,8 @@ import org.opensearch.tsdb.core.model.ByteLabels;
 import org.opensearch.tsdb.core.model.FloatSample;
 import org.opensearch.tsdb.core.model.Labels;
 import org.opensearch.tsdb.lang.m3.stage.SumStage;
-import org.opensearch.tsdb.query.aggregator.StreamingAggregationType;
-import org.opensearch.tsdb.query.aggregator.TimeSeriesStreamingAggregatorFactory;
+import org.opensearch.tsdb.query.aggregator.InplaceAggregationType;
+import org.opensearch.tsdb.query.aggregator.TimeSeriesInplaceAggregatorFactory;
 import org.opensearch.tsdb.query.aggregator.TimeSeriesUnfoldAggregatorFactory;
 
 import java.io.IOException;
@@ -49,7 +49,7 @@ import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Benchmark comparing TimeSeriesUnfoldAggregator (with SumStage) vs TimeSeriesStreamingAggregator
+ * Benchmark comparing TimeSeriesUnfoldAggregator (with SumStage) vs TimeSeriesInplaceAggregator
  * for "fetch | sum" and "fetch | sum zone service" queries using production-like labels.
  *
  * <p>Each time series has 12 labels mimicking a production metric topology.
@@ -61,7 +61,7 @@ import java.util.concurrent.TimeUnit;
 @Warmup(iterations = 2, time = 5, timeUnit = TimeUnit.SECONDS)
 @Measurement(iterations = 3, time = 5, timeUnit = TimeUnit.SECONDS)
 @Fork(1)
-public class TimeSeriesStreamingAggregationBenchmark extends BaseTSDBBenchmark {
+public class TimeSeriesInplaceAggregationBenchmark extends BaseTSDBBenchmark {
 
     @Param({ "10000", "100000" })
     public int cardinality;
@@ -70,9 +70,9 @@ public class TimeSeriesStreamingAggregationBenchmark extends BaseTSDBBenchmark {
     public int sampleCount;
 
     private Aggregator unfoldSumAggregator;
-    private Aggregator streamingSumAggregator;
+    private Aggregator inplaceSumAggregator;
     private Aggregator unfoldSumByTagsAggregator;
-    private Aggregator streamingSumByTagsAggregator;
+    private Aggregator inplaceSumByTagsAggregator;
 
     // All label values are selected from fixed pools
     private static final String[] REGIONS = { "dca", "phx" };
@@ -112,11 +112,11 @@ public class TimeSeriesStreamingAggregationBenchmark extends BaseTSDBBenchmark {
     public void setupAggregators() throws IOException {
         // --- Global sum (no tags) ---
         unfoldSumAggregator = createUnfoldAggregator("unfold_sum", new SumStage());
-        streamingSumAggregator = createStreamingAggregator("streaming_sum", null);
+        inplaceSumAggregator = createInplaceAggregator("inplace_sum", null);
 
         // --- Sum by zone, service ---
         unfoldSumByTagsAggregator = createUnfoldAggregator("unfold_sum_tags", new SumStage(GROUP_BY_TAGS));
-        streamingSumByTagsAggregator = createStreamingAggregator("streaming_sum_tags", GROUP_BY_TAGS);
+        inplaceSumByTagsAggregator = createInplaceAggregator("inplace_sum_tags", GROUP_BY_TAGS);
     }
 
     @TearDown(Level.Trial)
@@ -135,11 +135,11 @@ public class TimeSeriesStreamingAggregationBenchmark extends BaseTSDBBenchmark {
     }
 
     /**
-     * Benchmark: Streaming aggregator with SUM — "fetch | sum".
+     * Benchmark: Inplace aggregator with SUM — "fetch | sum".
      */
     @Benchmark
-    public void streamingSum(Blackhole bh) throws IOException {
-        bh.consume(runAggregation(streamingSumAggregator));
+    public void inplaceSum(Blackhole bh) throws IOException {
+        bh.consume(runAggregation(inplaceSumAggregator));
     }
 
     // ==================== Sum by tags benchmarks ====================
@@ -153,11 +153,11 @@ public class TimeSeriesStreamingAggregationBenchmark extends BaseTSDBBenchmark {
     }
 
     /**
-     * Benchmark: Streaming aggregator with SUM grouped by zone+service — "fetch | sum zone service".
+     * Benchmark: Inplace aggregator with SUM grouped by zone+service — "fetch | sum zone service".
      */
     @Benchmark
-    public void streamingSumByTags(Blackhole bh) throws IOException {
-        bh.consume(runAggregation(streamingSumByTagsAggregator));
+    public void inplaceSumByTags(Blackhole bh) throws IOException {
+        bh.consume(runAggregation(inplaceSumByTagsAggregator));
     }
 
     // ==================== Helpers ====================
@@ -177,14 +177,14 @@ public class TimeSeriesStreamingAggregationBenchmark extends BaseTSDBBenchmark {
         return factory.createInternal(searchContext, null, CardinalityUpperBound.ONE, Collections.emptyMap());
     }
 
-    private Aggregator createStreamingAggregator(String name, List<String> groupByTags) throws IOException {
-        TimeSeriesStreamingAggregatorFactory factory = new TimeSeriesStreamingAggregatorFactory(
+    private Aggregator createInplaceAggregator(String name, List<String> groupByTags) throws IOException {
+        TimeSeriesInplaceAggregatorFactory factory = new TimeSeriesInplaceAggregatorFactory(
             name,
             searchContext.getQueryShardContext(),
             null,
             AggregatorFactories.builder(),
             Collections.emptyMap(),
-            StreamingAggregationType.SUM,
+            InplaceAggregationType.SUM,
             groupByTags,
             MIN_TS,
             maxTs,

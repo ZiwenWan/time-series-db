@@ -10,10 +10,10 @@ package org.opensearch.tsdb.query.aggregator;
 import java.util.Locale;
 
 /**
- * Enumeration of aggregation types supported by the streaming aggregator.
+ * Enumeration of aggregation types supported by the inplace aggregator.
  *
  * <p>This enum defines the different aggregation operations that can be performed
- * in streaming mode without reconstructing full time series in memory.</p>
+ * in inplace mode without reconstructing full time series in memory.</p>
  *
  * <h2>Supported Operations:</h2>
  * <ul>
@@ -24,13 +24,13 @@ import java.util.Locale;
  * </ul>
  *
  * <h2>Memory Efficiency:</h2>
- * <p>Each type uses optimized data structures for streaming aggregation:</p>
+ * <p>Each type uses optimized data structures for inplace aggregation:</p>
  * <ul>
  *   <li><strong>SUM, MIN, MAX:</strong> Single double array per group</li>
  *   <li><strong>AVG:</strong> Double array + long array for sum and count tracking</li>
  * </ul>
  */
-public enum StreamingAggregationType {
+public enum InplaceAggregationType {
 
     /**
      * Sum aggregation - adds all values together.

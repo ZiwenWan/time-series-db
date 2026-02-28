@@ -15,13 +15,13 @@ import java.util.Collection;
 import java.util.List;
 
 /**
- * Integration tests for streaming aggregation.
- * Validates that streaming aggregation produces identical results to unfold aggregation
+ * Integration tests for inplace aggregation.
+ * Validates that inplace aggregation produces identical results to unfold aggregation
  * for eligible queries (fetch | sum/min/max/avg).
  */
-public class StreamingAggregationIT extends TimeSeriesTestFramework {
+public class InplaceAggregationIT extends TimeSeriesTestFramework {
 
-    private static final String STREAMING_TEST_YAML = "test_cases/streaming_aggregation_it.yaml";
+    private static final String INPLACE_TEST_YAML = "test_cases/inplace_aggregation_it.yaml";
 
     @Override
     protected Collection<Class<? extends Plugin>> nodePlugins() {
@@ -29,11 +29,11 @@ public class StreamingAggregationIT extends TimeSeriesTestFramework {
     }
 
     /**
-     * Test streaming aggregation correctness for sum, min, max, avg.
-     * Verifies that streaming results match unfold results.
+     * Test inplace aggregation correctness for sum, min, max, avg.
+     * Verifies that inplace results match unfold results.
      */
-    public void testStreamingAggregation() throws Exception {
-        loadTestConfigurationFromFile(STREAMING_TEST_YAML);
+    public void testInplaceAggregation() throws Exception {
+        loadTestConfigurationFromFile(INPLACE_TEST_YAML);
         runBasicTest();
     }
 }

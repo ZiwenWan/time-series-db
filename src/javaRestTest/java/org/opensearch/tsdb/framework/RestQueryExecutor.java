@@ -138,9 +138,9 @@ public class RestQueryExecutor extends BaseQueryExecutor {
             url = url + "&pushdown=false";
         }
 
-        // Add streaming parameter if enabled in query config
-        if (queryConfig.isStreaming()) {
-            url = url + "&streaming=true";
+        // Add inplace_aggregation parameter if enabled in query config
+        if (queryConfig.isInplaceAggregation()) {
+            url = url + "&inplace_aggregation=true";
         }
 
         Request request = new Request(RestRequest.Method.POST.name(), url);

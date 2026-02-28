@@ -71,10 +71,10 @@ public class M3OSTranslator {
      * @param pushdown Enable pushdown optimizations
      * @param profile Enable profiling
      * @param federationMetadata Metadata about federated query execution across partitions (nullable)
-     * @param streaming Enable streaming aggregation optimization for eligible queries
+     * @param inplaceAggregation Enable inplace aggregation optimization for eligible queries
      */
     public record Params(TimeUnit timeUnit, long startTime, long endTime, long step, boolean pushdown, boolean profile,
-        FederationMetadata federationMetadata, boolean streaming) {
+        FederationMetadata federationMetadata, boolean inplaceAggregation) {
 
         /**
          * Validation for params.
@@ -86,7 +86,7 @@ public class M3OSTranslator {
         }
 
         /**
-         * Constructor with default time unit and streaming disabled.
+         * Constructor with default time unit and inplace aggregation disabled.
          * @param startTime Query start time in default time unit
          * @param endTime Query end time in default time unit
          * @param step Step interval for aggregations in default time unit

@@ -55,9 +55,9 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * Unit tests for TimeSeriesStreamingAggregator and TimeSeriesStreamingAggregatorFactory.
+ * Unit tests for TimeSeriesInplaceAggregator and TimeSeriesInplaceAggregatorFactory.
  */
-public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
+public class TimeSeriesInplaceAggregatorTests extends OpenSearchTestCase {
 
     // ---- Leaf pruning tests ----
 
@@ -66,7 +66,7 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
         long queryMax = 5000L;
         long step = 100L;
 
-        TimeSeriesStreamingAggregator aggregator = createStreamingAggregator(StreamingAggregationType.SUM, null, queryMin, queryMax, step);
+        TimeSeriesInplaceAggregator aggregator = createInplaceAggregator(InplaceAggregationType.SUM, null, queryMin, queryMax, step);
 
         TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(6000L, 10000L);
         LeafBucketCollector mockSub = mock(LeafBucketCollector.class);
@@ -84,7 +84,7 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
         long queryMax = 5000L;
         long step = 100L;
 
-        TimeSeriesStreamingAggregator aggregator = createStreamingAggregator(StreamingAggregationType.SUM, null, queryMin, queryMax, step);
+        TimeSeriesInplaceAggregator aggregator = createInplaceAggregator(InplaceAggregationType.SUM, null, queryMin, queryMax, step);
 
         TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(2000L, 6000L);
         LeafBucketCollector mockSub = mock(LeafBucketCollector.class);
@@ -101,14 +101,14 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
     // ---- buildEmptyAggregation ----
 
     public void testBuildEmptyAggregation() throws IOException {
-        TimeSeriesStreamingAggregator aggregator = createStreamingAggregator(StreamingAggregationType.SUM, null, 1000L, 5000L, 100L);
+        TimeSeriesInplaceAggregator aggregator = createInplaceAggregator(InplaceAggregationType.SUM, null, 1000L, 5000L, 100L);
 
         InternalAggregation emptyAgg = aggregator.buildEmptyAggregation();
         assertNotNull("Empty aggregation should not be null", emptyAgg);
         assertTrue("Empty aggregation should be InternalTimeSeries", emptyAgg instanceof InternalTimeSeries);
 
         InternalTimeSeries ts = (InternalTimeSeries) emptyAgg;
-        assertEquals("Empty aggregation should have correct name", "test_streaming_agg", ts.getName());
+        assertEquals("Empty aggregation should have correct name", "test_inplace_agg", ts.getName());
         assertTrue("Empty aggregation should have empty series list", ts.getTimeSeries().isEmpty());
 
         aggregator.close();
@@ -118,28 +118,28 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
 
     public void testCreateReduceStageForEachType() throws IOException {
         // Test global aggregation (no groupByTags) for each type
-        assertReduceStageType(StreamingAggregationType.SUM, null, SumStage.class);
-        assertReduceStageType(StreamingAggregationType.MIN, null, MinStage.class);
-        assertReduceStageType(StreamingAggregationType.MAX, null, MaxStage.class);
-        assertReduceStageType(StreamingAggregationType.AVG, null, AvgStage.class);
+        assertReduceStageType(InplaceAggregationType.SUM, null, SumStage.class);
+        assertReduceStageType(InplaceAggregationType.MIN, null, MinStage.class);
+        assertReduceStageType(InplaceAggregationType.MAX, null, MaxStage.class);
+        assertReduceStageType(InplaceAggregationType.AVG, null, AvgStage.class);
 
         // Test with empty groupByTags (should still produce same stage types)
-        assertReduceStageType(StreamingAggregationType.SUM, List.of(), SumStage.class);
-        assertReduceStageType(StreamingAggregationType.MIN, List.of(), MinStage.class);
-        assertReduceStageType(StreamingAggregationType.MAX, List.of(), MaxStage.class);
-        assertReduceStageType(StreamingAggregationType.AVG, List.of(), AvgStage.class);
+        assertReduceStageType(InplaceAggregationType.SUM, List.of(), SumStage.class);
+        assertReduceStageType(InplaceAggregationType.MIN, List.of(), MinStage.class);
+        assertReduceStageType(InplaceAggregationType.MAX, List.of(), MaxStage.class);
+        assertReduceStageType(InplaceAggregationType.AVG, List.of(), AvgStage.class);
 
         // Test with groupByTags
         List<String> tags = List.of("host", "region");
-        assertReduceStageType(StreamingAggregationType.SUM, tags, SumStage.class);
-        assertReduceStageType(StreamingAggregationType.MIN, tags, MinStage.class);
-        assertReduceStageType(StreamingAggregationType.MAX, tags, MaxStage.class);
-        assertReduceStageType(StreamingAggregationType.AVG, tags, AvgStage.class);
+        assertReduceStageType(InplaceAggregationType.SUM, tags, SumStage.class);
+        assertReduceStageType(InplaceAggregationType.MIN, tags, MinStage.class);
+        assertReduceStageType(InplaceAggregationType.MAX, tags, MaxStage.class);
+        assertReduceStageType(InplaceAggregationType.AVG, tags, AvgStage.class);
     }
 
-    private void assertReduceStageType(StreamingAggregationType type, List<String> groupByTags, Class<?> expectedStageClass)
+    private void assertReduceStageType(InplaceAggregationType type, List<String> groupByTags, Class<?> expectedStageClass)
         throws IOException {
-        TimeSeriesStreamingAggregator aggregator = createStreamingAggregator(type, groupByTags, 1000L, 5000L, 100L);
+        TimeSeriesInplaceAggregator aggregator = createInplaceAggregator(type, groupByTags, 1000L, 5000L, 100L);
 
         InternalAggregation[] results = aggregator.buildAggregations(new long[] { 0 });
         assertEquals(1, results.length);
@@ -164,17 +164,17 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
 
     public void testCalculateTimeArraySize() throws IOException {
         // Use factory's getEstimatedTimeArraySize() which uses the same formula
-        TimeSeriesStreamingAggregatorFactory factory = createFactory(StreamingAggregationType.SUM, null, 1000L, 5000L, 100L);
+        TimeSeriesInplaceAggregatorFactory factory = createFactory(InplaceAggregationType.SUM, null, 1000L, 5000L, 100L);
         // (5000 - 1 - 1000) / 100 + 1 = 40
         assertEquals(40, factory.getEstimatedTimeArraySize());
 
         // Edge case: single point
-        TimeSeriesStreamingAggregatorFactory singlePointFactory = createFactory(StreamingAggregationType.SUM, null, 1000L, 1000L, 100L);
+        TimeSeriesInplaceAggregatorFactory singlePointFactory = createFactory(InplaceAggregationType.SUM, null, 1000L, 1000L, 100L);
         // (1000 - 1000) / 100 + 1 = 1
         assertEquals(1, singlePointFactory.getEstimatedTimeArraySize());
 
         // Larger range
-        TimeSeriesStreamingAggregatorFactory largeFactory = createFactory(StreamingAggregationType.SUM, null, 0L, 3600000L, 300000L);
+        TimeSeriesInplaceAggregatorFactory largeFactory = createFactory(InplaceAggregationType.SUM, null, 0L, 3600000L, 300000L);
         // (3600000 - 1 - 0) / 300000 + 1 = 12
         assertEquals(12, largeFactory.getEstimatedTimeArraySize());
     }
@@ -182,15 +182,15 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
     // ---- Factory tests ----
 
     public void testSupportsConcurrentSegmentSearch() throws IOException {
-        TimeSeriesStreamingAggregatorFactory factory = createFactory(StreamingAggregationType.SUM, null, 1000L, 5000L, 100L);
-        assertTrue("Streaming aggregation factory should support concurrent segment search", factory.supportsConcurrentSegmentSearch());
+        TimeSeriesInplaceAggregatorFactory factory = createFactory(InplaceAggregationType.SUM, null, 1000L, 5000L, 100L);
+        assertTrue("Inplace aggregation factory should support concurrent segment search", factory.supportsConcurrentSegmentSearch());
     }
 
     public void testFactoryConfiguration() throws IOException {
         List<String> tags = List.of("host", "region");
-        TimeSeriesStreamingAggregatorFactory factory = createFactory(StreamingAggregationType.AVG, tags, 2000L, 8000L, 500L);
+        TimeSeriesInplaceAggregatorFactory factory = createFactory(InplaceAggregationType.AVG, tags, 2000L, 8000L, 500L);
 
-        assertEquals(StreamingAggregationType.AVG, factory.getAggregationType());
+        assertEquals(InplaceAggregationType.AVG, factory.getAggregationType());
         assertEquals(tags, factory.getGroupByTags());
         assertEquals(2000L, factory.getMinTimestamp());
         assertEquals(8000L, factory.getMaxTimestamp());
@@ -201,7 +201,7 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
 
     public void testNoTagSumAggregation() throws IOException {
         long min = 1000L, max = 4000L, step = 1000L;
-        TimeSeriesStreamingAggregator agg = createStreamingAggregator(StreamingAggregationType.SUM, null, min, max, step);
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.SUM, null, min, max, step);
 
         TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
             min,
@@ -234,7 +234,7 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
 
     public void testNoTagMinAggregation() throws IOException {
         long min = 1000L, max = 4000L, step = 1000L;
-        TimeSeriesStreamingAggregator agg = createStreamingAggregator(StreamingAggregationType.MIN, null, min, max, step);
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.MIN, null, min, max, step);
 
         // Two documents with overlapping timestamps — min aggregation across documents
         TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
@@ -280,7 +280,7 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
 
     public void testNoTagMaxAggregation() throws IOException {
         long min = 1000L, max = 4000L, step = 1000L;
-        TimeSeriesStreamingAggregator agg = createStreamingAggregator(StreamingAggregationType.MAX, null, min, max, step);
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.MAX, null, min, max, step);
 
         // Two documents with overlapping timestamps — max aggregation across documents
         TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
@@ -325,7 +325,7 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
 
     public void testNoTagAvgAggregation() throws IOException {
         long min = 1000L, max = 4000L, step = 1000L;
-        TimeSeriesStreamingAggregator agg = createStreamingAggregator(StreamingAggregationType.AVG, null, min, max, step);
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.AVG, null, min, max, step);
 
         // Two documents with overlapping timestamps to accumulate sum + count
         TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
@@ -371,7 +371,7 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
 
     public void testNoTagSumMultipleDocuments() throws IOException {
         long min = 1000L, max = 4000L, step = 1000L;
-        TimeSeriesStreamingAggregator agg = createStreamingAggregator(StreamingAggregationType.SUM, null, min, max, step);
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.SUM, null, min, max, step);
 
         TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
             min,
@@ -404,7 +404,7 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
 
     public void testNoTagAggregationSkipsNaNSamples() throws IOException {
         long min = 1000L, max = 5000L, step = 1000L;
-        TimeSeriesStreamingAggregator agg = createStreamingAggregator(StreamingAggregationType.SUM, null, min, max, step);
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.SUM, null, min, max, step);
 
         TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
             min,
@@ -436,7 +436,7 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
 
     public void testNoTagAggregationEmptyResult() throws IOException {
         long min = 1000L, max = 4000L, step = 1000L;
-        TimeSeriesStreamingAggregator agg = createStreamingAggregator(StreamingAggregationType.SUM, null, min, max, step);
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.SUM, null, min, max, step);
 
         // Empty chunks — no data processed
         TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
@@ -462,7 +462,7 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
 
     // ---- LSI MemChunk inner chunk dedup tests ----
     // LSI MemChunks have multiple inner chunks whose timestamps partially overlap.
-    // chunksForDoc returns these as separate ChunkIterators. The streaming aggregator
+    // chunksForDoc returns these as separate ChunkIterators. The inplace aggregator
     // must merge+dedup them (matching unfold aggregator behavior).
 
     /**
@@ -473,7 +473,7 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
      */
     public void testNoTagSumLSIPartialOverlap() throws IOException {
         long min = 1000L, max = 5000L, step = 1000L;
-        TimeSeriesStreamingAggregator agg = createStreamingAggregator(StreamingAggregationType.SUM, null, min, max, step);
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.SUM, null, min, max, step);
 
         TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
             min,
@@ -514,7 +514,7 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
      */
     public void testNoTagSumLSIDedupThenAggregateAcrossDocuments() throws IOException {
         long min = 1000L, max = 4000L, step = 1000L;
-        TimeSeriesStreamingAggregator agg = createStreamingAggregator(StreamingAggregationType.SUM, null, min, max, step);
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.SUM, null, min, max, step);
 
         // Doc 1: two overlapping inner chunks (LSI MemChunk scenario)
         TSDBLeafReaderWithContext readerCtx1 = createMockTSDBLeafReaderWithContext(
@@ -565,7 +565,7 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
     public void testTagSumLSIDedupWithGrouping() throws IOException {
         long min = 1000L, max = 4000L, step = 1000L;
         List<String> groupByTags = List.of("region");
-        TimeSeriesStreamingAggregator agg = createStreamingAggregator(StreamingAggregationType.SUM, groupByTags, min, max, step);
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.SUM, groupByTags, min, max, step);
 
         Labels usLabels = mock(Labels.class);
         when(usLabels.has("region")).thenReturn(true);
@@ -605,7 +605,7 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
      */
     public void testNoTagSumLSIThreeInnerChunks() throws IOException {
         long min = 1000L, max = 4000L, step = 1000L;
-        TimeSeriesStreamingAggregator agg = createStreamingAggregator(StreamingAggregationType.SUM, null, min, max, step);
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.SUM, null, min, max, step);
 
         TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
             min,
@@ -645,7 +645,7 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
      */
     public void testNoTagSumDedupOverlappingChunks() throws IOException {
         long min = 1000L, max = 4000L, step = 1000L;
-        TimeSeriesStreamingAggregator agg = createStreamingAggregator(StreamingAggregationType.SUM, null, min, max, step);
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.SUM, null, min, max, step);
 
         // Two chunks with overlapping timestamps: both have t=1000 and t=2000
         // Without dedup, SUM would double-count: 10+99=109 at t=1000, 20+88=108 at t=2000
@@ -683,7 +683,7 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
      */
     public void testNoTagSumSingleChunkNoDedup() throws IOException {
         long min = 1000L, max = 4000L, step = 1000L;
-        TimeSeriesStreamingAggregator agg = createStreamingAggregator(StreamingAggregationType.SUM, null, min, max, step);
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.SUM, null, min, max, step);
 
         // Single chunk — mergeAndDedup should return it directly
         TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
@@ -718,7 +718,7 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
     public void testTagSumDedupOverlappingChunks() throws IOException {
         long min = 1000L, max = 4000L, step = 1000L;
         List<String> groupByTags = List.of("region");
-        TimeSeriesStreamingAggregator agg = createStreamingAggregator(StreamingAggregationType.SUM, groupByTags, min, max, step);
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.SUM, groupByTags, min, max, step);
 
         Labels mockLabels = mock(Labels.class);
         when(mockLabels.has("region")).thenReturn(true);
@@ -753,7 +753,7 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
     public void testTagSumAggregation() throws IOException {
         long min = 1000L, max = 4000L, step = 1000L;
         List<String> groupByTags = List.of("region");
-        TimeSeriesStreamingAggregator agg = createStreamingAggregator(StreamingAggregationType.SUM, groupByTags, min, max, step);
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.SUM, groupByTags, min, max, step);
 
         Labels mockLabels = mock(Labels.class);
         when(mockLabels.has("region")).thenReturn(true);
@@ -789,7 +789,7 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
     public void testTagAvgAggregation() throws IOException {
         long min = 1000L, max = 4000L, step = 1000L;
         List<String> groupByTags = List.of("region");
-        TimeSeriesStreamingAggregator agg = createStreamingAggregator(StreamingAggregationType.AVG, groupByTags, min, max, step);
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.AVG, groupByTags, min, max, step);
 
         Labels mockLabels = mock(Labels.class);
         when(mockLabels.has("region")).thenReturn(true);
@@ -839,7 +839,7 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
     public void testTagAggregationMissingGroupByTag() throws IOException {
         long min = 1000L, max = 4000L, step = 1000L;
         List<String> groupByTags = List.of("region");
-        TimeSeriesStreamingAggregator agg = createStreamingAggregator(StreamingAggregationType.SUM, groupByTags, min, max, step);
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.SUM, groupByTags, min, max, step);
 
         // Labels missing the required "region" tag
         Labels mockLabels = mock(Labels.class);
@@ -870,10 +870,10 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
         long min = 1000L, max = 4000L, step = 1000L;
         // Empty groupByTags list → extractGroupLabels returns ByteLabels.emptyLabels()
         List<String> groupByTags = List.of();
-        TimeSeriesStreamingAggregator agg = createStreamingAggregator(StreamingAggregationType.SUM, groupByTags, min, max, step);
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.SUM, groupByTags, min, max, step);
 
-        // Note: with empty groupByTags, createStreamingState() creates NoTagStreamingState
-        // (groupByTags.isEmpty() check in createStreamingState)
+        // Note: with empty groupByTags, createInplaceState() creates NoTagInplaceState
+        // (groupByTags.isEmpty() check in createInplaceState)
         TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
             min,
             max,
@@ -900,7 +900,7 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
     public void testTagAggregationMultipleGroups() throws IOException {
         long min = 1000L, max = 4000L, step = 1000L;
         List<String> groupByTags = List.of("region");
-        TimeSeriesStreamingAggregator agg = createStreamingAggregator(StreamingAggregationType.SUM, groupByTags, min, max, step);
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.SUM, groupByTags, min, max, step);
 
         // Two different label sets for two different groups
         Labels usLabels = mock(Labels.class);
@@ -962,10 +962,10 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
         when(mockSearchContext.getQueryShardContext()).thenReturn(mockQueryShardContext);
         when(mockSearchContext.bigArrays()).thenReturn(bigArrays);
 
-        TimeSeriesStreamingAggregator agg = new TimeSeriesStreamingAggregator(
+        TimeSeriesInplaceAggregator agg = new TimeSeriesInplaceAggregator(
             "test_cb",
             AggregatorFactories.EMPTY,
-            StreamingAggregationType.SUM,
+            InplaceAggregationType.SUM,
             null,
             mockSearchContext,
             null,
@@ -1000,19 +1000,19 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
         agg.close();
     }
 
-    // ---- StreamingAggregationType tests ----
+    // ---- InplaceAggregationType tests ----
 
     public void testGetDisplayName() {
-        assertEquals("sum", StreamingAggregationType.SUM.getDisplayName());
-        assertEquals("min", StreamingAggregationType.MIN.getDisplayName());
-        assertEquals("max", StreamingAggregationType.MAX.getDisplayName());
-        assertEquals("avg", StreamingAggregationType.AVG.getDisplayName());
+        assertEquals("sum", InplaceAggregationType.SUM.getDisplayName());
+        assertEquals("min", InplaceAggregationType.MIN.getDisplayName());
+        assertEquals("max", InplaceAggregationType.MAX.getDisplayName());
+        assertEquals("avg", InplaceAggregationType.AVG.getDisplayName());
     }
 
     // ---- Factory createInternal test ----
 
     public void testFactoryCreateInternal() throws IOException {
-        TimeSeriesStreamingAggregatorFactory factory = createFactory(StreamingAggregationType.SUM, null, 1000L, 5000L, 100L);
+        TimeSeriesInplaceAggregatorFactory factory = createFactory(InplaceAggregationType.SUM, null, 1000L, 5000L, 100L);
 
         SearchContext mockSearchContext = mock(SearchContext.class);
         QueryShardContext mockQueryShardContext = mock(QueryShardContext.class);
@@ -1023,14 +1023,14 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
 
         Aggregator aggregator = factory.createInternal(mockSearchContext, null, CardinalityUpperBound.NONE, Map.of());
         assertNotNull(aggregator);
-        assertTrue("Should create TimeSeriesStreamingAggregator", aggregator instanceof TimeSeriesStreamingAggregator);
+        assertTrue("Should create TimeSeriesInplaceAggregator", aggregator instanceof TimeSeriesInplaceAggregator);
         aggregator.close();
     }
 
     // ---- Helper methods ----
 
-    private TimeSeriesStreamingAggregator createStreamingAggregator(
-        StreamingAggregationType type,
+    private TimeSeriesInplaceAggregator createInplaceAggregator(
+        InplaceAggregationType type,
         List<String> groupByTags,
         long min,
         long max,
@@ -1045,8 +1045,8 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
         when(mockSearchContext.getQueryShardContext()).thenReturn(mockQueryShardContext);
         when(mockSearchContext.bigArrays()).thenReturn(bigArrays);
 
-        return new TimeSeriesStreamingAggregator(
-            "test_streaming_agg",
+        return new TimeSeriesInplaceAggregator(
+            "test_inplace_agg",
             AggregatorFactories.EMPTY,
             type,
             groupByTags,
@@ -1060,8 +1060,8 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
         );
     }
 
-    private TimeSeriesStreamingAggregatorFactory createFactory(
-        StreamingAggregationType type,
+    private TimeSeriesInplaceAggregatorFactory createFactory(
+        InplaceAggregationType type,
         List<String> groupByTags,
         long min,
         long max,
@@ -1069,7 +1069,7 @@ public class TimeSeriesStreamingAggregatorTests extends OpenSearchTestCase {
     ) throws IOException {
         QueryShardContext mockQueryShardContext = mock(QueryShardContext.class);
 
-        return new TimeSeriesStreamingAggregatorFactory(
+        return new TimeSeriesInplaceAggregatorFactory(
             "test_factory",
             mockQueryShardContext,
             null,

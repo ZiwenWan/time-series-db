@@ -34,14 +34,14 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * Unit tests for TimeSeriesStreamingAggregationBuilder.
+ * Unit tests for TimeSeriesInplaceAggregationBuilder.
  */
-public class TimeSeriesStreamingAggregationBuilderTests extends BaseAggregationTestCase<TimeSeriesStreamingAggregationBuilder> {
+public class TimeSeriesInplaceAggregationBuilderTests extends BaseAggregationTestCase<TimeSeriesInplaceAggregationBuilder> {
 
     @Override
-    protected TimeSeriesStreamingAggregationBuilder createTestAggregatorBuilder() {
-        StreamingAggregationType[] types = StreamingAggregationType.values();
-        StreamingAggregationType aggregationType = types[randomInt(types.length - 1)];
+    protected TimeSeriesInplaceAggregationBuilder createTestAggregatorBuilder() {
+        InplaceAggregationType[] types = InplaceAggregationType.values();
+        InplaceAggregationType aggregationType = types[randomInt(types.length - 1)];
 
         List<String> groupByTags = null;
         int tagChoice = randomInt(2);
@@ -63,7 +63,7 @@ public class TimeSeriesStreamingAggregationBuilderTests extends BaseAggregationT
         long maxTimestamp = randomLongBetween(minTimestamp + 1, minTimestamp + 5000L);
         long step = randomLongBetween(1L, 100L) * 10;
 
-        return new TimeSeriesStreamingAggregationBuilder(name, aggregationType, groupByTags, minTimestamp, maxTimestamp, step);
+        return new TimeSeriesInplaceAggregationBuilder(name, aggregationType, groupByTags, minTimestamp, maxTimestamp, step);
     }
 
     @Override
@@ -72,8 +72,8 @@ public class TimeSeriesStreamingAggregationBuilderTests extends BaseAggregationT
             List.of(
                 new NamedXContentRegistry.Entry(
                     BaseAggregationBuilder.class,
-                    new ParseField(TimeSeriesStreamingAggregationBuilder.NAME),
-                    (p, n) -> TimeSeriesStreamingAggregationBuilder.parse((String) n, p)
+                    new ParseField(TimeSeriesInplaceAggregationBuilder.NAME),
+                    (p, n) -> TimeSeriesInplaceAggregationBuilder.parse((String) n, p)
                 )
             )
         );
@@ -85,8 +85,8 @@ public class TimeSeriesStreamingAggregationBuilderTests extends BaseAggregationT
             List.of(
                 new NamedWriteableRegistry.Entry(
                     AggregationBuilder.class,
-                    TimeSeriesStreamingAggregationBuilder.NAME,
-                    TimeSeriesStreamingAggregationBuilder::new
+                    TimeSeriesInplaceAggregationBuilder.NAME,
+                    TimeSeriesInplaceAggregationBuilder::new
                 )
             )
         );
@@ -95,37 +95,37 @@ public class TimeSeriesStreamingAggregationBuilderTests extends BaseAggregationT
     // ---- Constructor tests ----
 
     public void testConstructorBasic() {
-        TimeSeriesStreamingAggregationBuilder builder = new TimeSeriesStreamingAggregationBuilder(
-            "test_streaming",
-            StreamingAggregationType.SUM,
+        TimeSeriesInplaceAggregationBuilder builder = new TimeSeriesInplaceAggregationBuilder(
+            "test_inplace",
+            InplaceAggregationType.SUM,
             List.of("host"),
             1000L,
             2000L,
             100L
         );
 
-        assertEquals("test_streaming", builder.getName());
-        assertEquals(StreamingAggregationType.SUM, builder.getAggregationType());
+        assertEquals("test_inplace", builder.getName());
+        assertEquals(InplaceAggregationType.SUM, builder.getAggregationType());
         assertEquals(List.of("host"), builder.getGroupByTags());
         assertEquals(1000L, builder.getMinTimestamp());
         assertEquals(2000L, builder.getMaxTimestamp());
         assertEquals(100L, builder.getStep());
-        assertEquals("time_series_streaming", builder.getType());
-        assertEquals(TimeSeriesStreamingAggregationBuilder.NAME, "time_series_streaming");
+        assertEquals("time_series_inplace", builder.getType());
+        assertEquals(TimeSeriesInplaceAggregationBuilder.NAME, "time_series_inplace");
     }
 
     public void testConstructorValidatesTimestampRange() {
         // maxTimestamp == minTimestamp
         IllegalArgumentException exception1 = expectThrows(
             IllegalArgumentException.class,
-            () -> new TimeSeriesStreamingAggregationBuilder("test", StreamingAggregationType.SUM, null, 1000L, 1000L, 100L)
+            () -> new TimeSeriesInplaceAggregationBuilder("test", InplaceAggregationType.SUM, null, 1000L, 1000L, 100L)
         );
         assertTrue(exception1.getMessage().contains("maxTimestamp must be greater than minTimestamp"));
 
         // maxTimestamp < minTimestamp
         IllegalArgumentException exception2 = expectThrows(
             IllegalArgumentException.class,
-            () -> new TimeSeriesStreamingAggregationBuilder("test", StreamingAggregationType.SUM, null, 2000L, 1000L, 100L)
+            () -> new TimeSeriesInplaceAggregationBuilder("test", InplaceAggregationType.SUM, null, 2000L, 1000L, 100L)
         );
         assertTrue(exception2.getMessage().contains("maxTimestamp must be greater than minTimestamp"));
     }
@@ -133,28 +133,28 @@ public class TimeSeriesStreamingAggregationBuilderTests extends BaseAggregationT
     public void testConstructorValidatesStep() {
         IllegalArgumentException exception = expectThrows(
             IllegalArgumentException.class,
-            () -> new TimeSeriesStreamingAggregationBuilder("test", StreamingAggregationType.SUM, null, 1000L, 2000L, 0L)
+            () -> new TimeSeriesInplaceAggregationBuilder("test", InplaceAggregationType.SUM, null, 1000L, 2000L, 0L)
         );
         assertTrue(exception.getMessage().contains("step must be positive"));
 
         IllegalArgumentException exception2 = expectThrows(
             IllegalArgumentException.class,
-            () -> new TimeSeriesStreamingAggregationBuilder("test", StreamingAggregationType.SUM, null, 1000L, 2000L, -1L)
+            () -> new TimeSeriesInplaceAggregationBuilder("test", InplaceAggregationType.SUM, null, 1000L, 2000L, -1L)
         );
         assertTrue(exception2.getMessage().contains("step must be positive"));
     }
 
     public void testConstructorValidatesAggregationType() {
-        expectThrows(NullPointerException.class, () -> new TimeSeriesStreamingAggregationBuilder("test", null, null, 1000L, 2000L, 100L));
+        expectThrows(NullPointerException.class, () -> new TimeSeriesInplaceAggregationBuilder("test", null, null, 1000L, 2000L, 100L));
     }
 
     // ---- Shallow copy ----
 
     public void testShallowCopy() {
         List<String> tags = List.of("host", "region");
-        TimeSeriesStreamingAggregationBuilder original = new TimeSeriesStreamingAggregationBuilder(
+        TimeSeriesInplaceAggregationBuilder original = new TimeSeriesInplaceAggregationBuilder(
             "test_copy",
-            StreamingAggregationType.AVG,
+            InplaceAggregationType.AVG,
             tags,
             1000L,
             2000L,
@@ -162,8 +162,8 @@ public class TimeSeriesStreamingAggregationBuilderTests extends BaseAggregationT
         );
 
         AggregationBuilder copy = original.shallowCopy(null, Map.of("key", "value"));
-        assertTrue(copy instanceof TimeSeriesStreamingAggregationBuilder);
-        TimeSeriesStreamingAggregationBuilder typedCopy = (TimeSeriesStreamingAggregationBuilder) copy;
+        assertTrue(copy instanceof TimeSeriesInplaceAggregationBuilder);
+        TimeSeriesInplaceAggregationBuilder typedCopy = (TimeSeriesInplaceAggregationBuilder) copy;
 
         assertEquals(original.getName(), typedCopy.getName());
         assertEquals(original.getAggregationType(), typedCopy.getAggregationType());
@@ -176,9 +176,9 @@ public class TimeSeriesStreamingAggregationBuilderTests extends BaseAggregationT
     // ---- Bucket cardinality ----
 
     public void testBucketCardinality() {
-        TimeSeriesStreamingAggregationBuilder builder = new TimeSeriesStreamingAggregationBuilder(
+        TimeSeriesInplaceAggregationBuilder builder = new TimeSeriesInplaceAggregationBuilder(
             "test_card",
-            StreamingAggregationType.SUM,
+            InplaceAggregationType.SUM,
             null,
             1000L,
             2000L,
@@ -190,9 +190,9 @@ public class TimeSeriesStreamingAggregationBuilderTests extends BaseAggregationT
     // ---- doBuild tests ----
 
     public void testDoBuild() throws Exception {
-        TimeSeriesStreamingAggregationBuilder builder = new TimeSeriesStreamingAggregationBuilder(
+        TimeSeriesInplaceAggregationBuilder builder = new TimeSeriesInplaceAggregationBuilder(
             "test_build",
-            StreamingAggregationType.SUM,
+            InplaceAggregationType.SUM,
             List.of("host"),
             1000L,
             2000L,
@@ -205,13 +205,13 @@ public class TimeSeriesStreamingAggregationBuilderTests extends BaseAggregationT
 
         AggregatorFactory factory = builder.doBuild(mockContext, mockParent, mockSubFactoriesBuilder);
         assertNotNull(factory);
-        assertTrue(factory instanceof TimeSeriesStreamingAggregatorFactory);
+        assertTrue(factory instanceof TimeSeriesInplaceAggregatorFactory);
     }
 
     public void testDoBuildFailsWhenTsdbEngineDisabled() throws Exception {
-        TimeSeriesStreamingAggregationBuilder builder = new TimeSeriesStreamingAggregationBuilder(
+        TimeSeriesInplaceAggregationBuilder builder = new TimeSeriesInplaceAggregationBuilder(
             "test_build_fail",
-            StreamingAggregationType.SUM,
+            InplaceAggregationType.SUM,
             null,
             1000L,
             2000L,
@@ -232,9 +232,9 @@ public class TimeSeriesStreamingAggregationBuilderTests extends BaseAggregationT
     // ---- XContent tests ----
 
     public void testXContentGeneration() throws IOException {
-        TimeSeriesStreamingAggregationBuilder builder = new TimeSeriesStreamingAggregationBuilder(
+        TimeSeriesInplaceAggregationBuilder builder = new TimeSeriesInplaceAggregationBuilder(
             "test_xcontent",
-            StreamingAggregationType.SUM,
+            InplaceAggregationType.SUM,
             List.of("host", "region"),
             1000L,
             2000L,
@@ -257,9 +257,9 @@ public class TimeSeriesStreamingAggregationBuilderTests extends BaseAggregationT
     }
 
     public void testXContentWithoutGroupByTags() throws IOException {
-        TimeSeriesStreamingAggregationBuilder builder = new TimeSeriesStreamingAggregationBuilder(
+        TimeSeriesInplaceAggregationBuilder builder = new TimeSeriesInplaceAggregationBuilder(
             "test_xcontent_null",
-            StreamingAggregationType.MIN,
+            InplaceAggregationType.MIN,
             null,
             1000L,
             2000L,
@@ -291,10 +291,10 @@ public class TimeSeriesStreamingAggregationBuilderTests extends BaseAggregationT
 
         try (XContentParser parser = createParser(JsonXContent.jsonXContent, json)) {
             parser.nextToken();
-            TimeSeriesStreamingAggregationBuilder result = TimeSeriesStreamingAggregationBuilder.parse("test_agg", parser);
+            TimeSeriesInplaceAggregationBuilder result = TimeSeriesInplaceAggregationBuilder.parse("test_agg", parser);
 
             assertEquals("test_agg", result.getName());
-            assertEquals(StreamingAggregationType.SUM, result.getAggregationType());
+            assertEquals(InplaceAggregationType.SUM, result.getAggregationType());
             assertEquals(List.of("host", "region"), result.getGroupByTags());
             assertEquals(1000L, result.getMinTimestamp());
             assertEquals(2000L, result.getMaxTimestamp());
@@ -315,7 +315,7 @@ public class TimeSeriesStreamingAggregationBuilderTests extends BaseAggregationT
             parser.nextToken();
             IllegalArgumentException exception = expectThrows(
                 IllegalArgumentException.class,
-                () -> TimeSeriesStreamingAggregationBuilder.parse("test_agg", parser)
+                () -> TimeSeriesInplaceAggregationBuilder.parse("test_agg", parser)
             );
             assertTrue(exception.getMessage().contains("aggregation_type"));
         }
@@ -334,7 +334,7 @@ public class TimeSeriesStreamingAggregationBuilderTests extends BaseAggregationT
             parser.nextToken();
             IllegalArgumentException exception = expectThrows(
                 IllegalArgumentException.class,
-                () -> TimeSeriesStreamingAggregationBuilder.parse("test_agg", parser)
+                () -> TimeSeriesInplaceAggregationBuilder.parse("test_agg", parser)
             );
             assertTrue(exception.getMessage().contains("min_timestamp"));
         }
@@ -353,7 +353,7 @@ public class TimeSeriesStreamingAggregationBuilderTests extends BaseAggregationT
             parser.nextToken();
             IllegalArgumentException exception = expectThrows(
                 IllegalArgumentException.class,
-                () -> TimeSeriesStreamingAggregationBuilder.parse("test_agg", parser)
+                () -> TimeSeriesInplaceAggregationBuilder.parse("test_agg", parser)
             );
             assertTrue(exception.getMessage().contains("max_timestamp"));
         }
@@ -372,7 +372,7 @@ public class TimeSeriesStreamingAggregationBuilderTests extends BaseAggregationT
             parser.nextToken();
             IllegalArgumentException exception = expectThrows(
                 IllegalArgumentException.class,
-                () -> TimeSeriesStreamingAggregationBuilder.parse("test_agg", parser)
+                () -> TimeSeriesInplaceAggregationBuilder.parse("test_agg", parser)
             );
             assertTrue(exception.getMessage().contains("step"));
         }
@@ -392,7 +392,7 @@ public class TimeSeriesStreamingAggregationBuilderTests extends BaseAggregationT
             parser.nextToken();
             IllegalArgumentException exception = expectThrows(
                 IllegalArgumentException.class,
-                () -> TimeSeriesStreamingAggregationBuilder.parse("test_agg", parser)
+                () -> TimeSeriesInplaceAggregationBuilder.parse("test_agg", parser)
             );
             assertTrue(exception.getMessage().contains("Invalid aggregation_type"));
         }
@@ -412,9 +412,9 @@ public class TimeSeriesStreamingAggregationBuilderTests extends BaseAggregationT
 
         try (XContentParser parser = createParser(JsonXContent.jsonXContent, json)) {
             parser.nextToken();
-            TimeSeriesStreamingAggregationBuilder result = TimeSeriesStreamingAggregationBuilder.parse("test_agg", parser);
+            TimeSeriesInplaceAggregationBuilder result = TimeSeriesInplaceAggregationBuilder.parse("test_agg", parser);
 
-            assertEquals(StreamingAggregationType.MAX, result.getAggregationType());
+            assertEquals(InplaceAggregationType.MAX, result.getAggregationType());
             assertEquals(1000L, result.getMinTimestamp());
             assertEquals(2000L, result.getMaxTimestamp());
             assertEquals(100L, result.getStep());
@@ -435,7 +435,7 @@ public class TimeSeriesStreamingAggregationBuilderTests extends BaseAggregationT
 
         try (XContentParser parser = createParser(JsonXContent.jsonXContent, json)) {
             parser.nextToken();
-            TimeSeriesStreamingAggregationBuilder result = TimeSeriesStreamingAggregationBuilder.parse("test_agg", parser);
+            TimeSeriesInplaceAggregationBuilder result = TimeSeriesInplaceAggregationBuilder.parse("test_agg", parser);
 
             assertNull("Empty group_by_tags array should result in null", result.getGroupByTags());
         }
@@ -445,17 +445,17 @@ public class TimeSeriesStreamingAggregationBuilderTests extends BaseAggregationT
 
     public void testEquals() {
         List<String> tags = List.of("host");
-        TimeSeriesStreamingAggregationBuilder builder1 = new TimeSeriesStreamingAggregationBuilder(
+        TimeSeriesInplaceAggregationBuilder builder1 = new TimeSeriesInplaceAggregationBuilder(
             "test",
-            StreamingAggregationType.SUM,
+            InplaceAggregationType.SUM,
             tags,
             1000L,
             2000L,
             100L
         );
-        TimeSeriesStreamingAggregationBuilder builder2 = new TimeSeriesStreamingAggregationBuilder(
+        TimeSeriesInplaceAggregationBuilder builder2 = new TimeSeriesInplaceAggregationBuilder(
             "test",
-            StreamingAggregationType.SUM,
+            InplaceAggregationType.SUM,
             tags,
             1000L,
             2000L,
@@ -464,9 +464,9 @@ public class TimeSeriesStreamingAggregationBuilderTests extends BaseAggregationT
         assertTrue("Equal objects should return true", builder1.equals(builder2));
 
         // Different aggregationType
-        TimeSeriesStreamingAggregationBuilder diffType = new TimeSeriesStreamingAggregationBuilder(
+        TimeSeriesInplaceAggregationBuilder diffType = new TimeSeriesInplaceAggregationBuilder(
             "test",
-            StreamingAggregationType.MIN,
+            InplaceAggregationType.MIN,
             tags,
             1000L,
             2000L,
@@ -475,9 +475,9 @@ public class TimeSeriesStreamingAggregationBuilderTests extends BaseAggregationT
         assertFalse("Different aggregationType should return false", builder1.equals(diffType));
 
         // Different groupByTags
-        TimeSeriesStreamingAggregationBuilder diffTags = new TimeSeriesStreamingAggregationBuilder(
+        TimeSeriesInplaceAggregationBuilder diffTags = new TimeSeriesInplaceAggregationBuilder(
             "test",
-            StreamingAggregationType.SUM,
+            InplaceAggregationType.SUM,
             List.of("region"),
             1000L,
             2000L,
@@ -486,9 +486,9 @@ public class TimeSeriesStreamingAggregationBuilderTests extends BaseAggregationT
         assertFalse("Different groupByTags should return false", builder1.equals(diffTags));
 
         // Different minTimestamp
-        TimeSeriesStreamingAggregationBuilder diffMin = new TimeSeriesStreamingAggregationBuilder(
+        TimeSeriesInplaceAggregationBuilder diffMin = new TimeSeriesInplaceAggregationBuilder(
             "test",
-            StreamingAggregationType.SUM,
+            InplaceAggregationType.SUM,
             tags,
             999L,
             2000L,
@@ -497,9 +497,9 @@ public class TimeSeriesStreamingAggregationBuilderTests extends BaseAggregationT
         assertFalse("Different minTimestamp should return false", builder1.equals(diffMin));
 
         // Different maxTimestamp
-        TimeSeriesStreamingAggregationBuilder diffMax = new TimeSeriesStreamingAggregationBuilder(
+        TimeSeriesInplaceAggregationBuilder diffMax = new TimeSeriesInplaceAggregationBuilder(
             "test",
-            StreamingAggregationType.SUM,
+            InplaceAggregationType.SUM,
             tags,
             1000L,
             2001L,
@@ -508,9 +508,9 @@ public class TimeSeriesStreamingAggregationBuilderTests extends BaseAggregationT
         assertFalse("Different maxTimestamp should return false", builder1.equals(diffMax));
 
         // Different step
-        TimeSeriesStreamingAggregationBuilder diffStep = new TimeSeriesStreamingAggregationBuilder(
+        TimeSeriesInplaceAggregationBuilder diffStep = new TimeSeriesInplaceAggregationBuilder(
             "test",
-            StreamingAggregationType.SUM,
+            InplaceAggregationType.SUM,
             tags,
             1000L,
             2000L,
@@ -519,9 +519,9 @@ public class TimeSeriesStreamingAggregationBuilderTests extends BaseAggregationT
         assertFalse("Different step should return false", builder1.equals(diffStep));
 
         // Different name
-        TimeSeriesStreamingAggregationBuilder diffName = new TimeSeriesStreamingAggregationBuilder(
+        TimeSeriesInplaceAggregationBuilder diffName = new TimeSeriesInplaceAggregationBuilder(
             "different",
-            StreamingAggregationType.SUM,
+            InplaceAggregationType.SUM,
             tags,
             1000L,
             2000L,
@@ -534,7 +534,7 @@ public class TimeSeriesStreamingAggregationBuilderTests extends BaseAggregationT
 
     public void testRegisterAggregators() {
         ValuesSourceRegistry.Builder mockBuilder = mock(ValuesSourceRegistry.Builder.class);
-        TimeSeriesStreamingAggregationBuilder.registerAggregators(mockBuilder);
+        TimeSeriesInplaceAggregationBuilder.registerAggregators(mockBuilder);
     }
 
     // ---- Helper methods ----

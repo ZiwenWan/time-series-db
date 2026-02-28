@@ -28,29 +28,35 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Interface for streaming aggregation state that processes documents incrementally.
+ * Interface for inplace aggregation state that processes documents incrementally.
  */
-interface StreamingAggregationState {
+interface InplaceAggregationState {
     void processDocument(int docId, TSDBDocValues docValues, TSDBLeafReader reader) throws IOException;
 
     List<TimeSeries> getFinalResults(long minTimestamp, long maxTimestamp, long step);
 
     long getEstimatedMemoryUsage();
 
+    /**
+     * Returns the number of bytes added since the last call, then resets the counter.
+     * Used for incremental circuit breaker tracking without recomputing total memory each time.
+     */
+    long consumeMemoryDelta();
+
     boolean hasData();
 }
 
 /**
- * Time-indexed arrays for a single group in streaming aggregation.
+ * Time-indexed arrays for a single group in inplace aggregation.
  */
 class GroupTimeArrays {
     private final double[] values;
     private final int[] counts; // Only used for AVG
-    private final StreamingAggregationType aggregationType;
+    private final InplaceAggregationType aggregationType;
     private boolean hasData = false;
     private int nonNanCount = 0;
 
-    GroupTimeArrays(int size, StreamingAggregationType aggregationType) {
+    GroupTimeArrays(int size, InplaceAggregationType aggregationType) {
         this.values = new double[size];
         this.aggregationType = aggregationType;
         this.counts = aggregationType.requiresCountTracking() ? new int[size] : null;
@@ -90,7 +96,7 @@ class GroupTimeArrays {
         }
 
         // AVG uses SumCountSample, which is not a simple float sample
-        if (aggregationType == StreamingAggregationType.AVG) {
+        if (aggregationType == InplaceAggregationType.AVG) {
             List<Sample> samples = new ArrayList<>(nonNanCount);
             for (int i = 0; i < values.length; i++) {
                 if (!Double.isNaN(values[i]) && counts[i] > 0) {
@@ -125,16 +131,23 @@ class GroupTimeArrays {
 }
 
 /**
- * Streaming state implementation for no-tag aggregations (single time series result).
+ * Inplace aggregation state implementation for no-tag aggregations (single time series result).
  */
-class NoTagStreamingState implements StreamingAggregationState {
-    private final StreamingAggregationType aggregationType;
+class NoTagInplaceAggregationState implements InplaceAggregationState {
+    private final InplaceAggregationType aggregationType;
     private final GroupTimeArrays arrays;
     private final long minTimestamp;
     private final long maxTimestamp;
     private final long step;
+    private boolean memoryReported = false;
 
-    NoTagStreamingState(StreamingAggregationType aggregationType, int timeArraySize, long minTimestamp, long maxTimestamp, long step) {
+    NoTagInplaceAggregationState(
+        InplaceAggregationType aggregationType,
+        int timeArraySize,
+        long minTimestamp,
+        long maxTimestamp,
+        long step
+    ) {
         this.aggregationType = aggregationType;
         this.arrays = new GroupTimeArrays(timeArraySize, aggregationType);
         this.minTimestamp = minTimestamp;
@@ -202,25 +215,36 @@ class NoTagStreamingState implements StreamingAggregationState {
     }
 
     @Override
+    public long consumeMemoryDelta() {
+        if (!memoryReported) {
+            memoryReported = true;
+            return getEstimatedMemoryUsage();
+        }
+        return 0;
+    }
+
+    @Override
     public boolean hasData() {
         return arrays.hasData();
     }
 }
 
 /**
- * Streaming state implementation for tag-based aggregations (grouped time series results).
+ * Inplace aggregation state implementation for tag-based aggregations (grouped time series results).
  */
-class TagStreamingState implements StreamingAggregationState {
-    private final StreamingAggregationType aggregationType;
+class TagInplaceAggregationState implements InplaceAggregationState {
+    private final InplaceAggregationType aggregationType;
     private final List<String> groupByTags;
     private final Map<ByteLabels, GroupTimeArrays> groupData = new HashMap<>();
     private final int timeArraySize;
     private final long minTimestamp;
     private final long maxTimestamp;
     private final long step;
+    private final long perGroupMemoryUsage;
+    private int lastReportedGroupCount = 0;
 
-    TagStreamingState(
-        StreamingAggregationType aggregationType,
+    TagInplaceAggregationState(
+        InplaceAggregationType aggregationType,
         List<String> groupByTags,
         int timeArraySize,
         long minTimestamp,
@@ -233,6 +257,7 @@ class TagStreamingState implements StreamingAggregationState {
         this.minTimestamp = minTimestamp;
         this.maxTimestamp = maxTimestamp;
         this.step = step;
+        this.perGroupMemoryUsage = timeArraySize * 8L + (aggregationType.requiresCountTracking() ? timeArraySize * 4L : 0L) + 32L;
     }
 
     @Override
@@ -313,7 +338,7 @@ class TagStreamingState implements StreamingAggregationState {
                     this.minTimestamp,
                     this.maxTimestamp,
                     this.step,
-                    null // No alias for streaming aggregation
+                    null // No alias for inplace aggregation
                 );
                 results.add(timeSeries);
             }
@@ -324,11 +349,15 @@ class TagStreamingState implements StreamingAggregationState {
 
     @Override
     public long getEstimatedMemoryUsage() {
-        long totalSize = 64; // object overhead
-        for (GroupTimeArrays arrays : groupData.values()) {
-            totalSize += arrays.getEstimatedMemoryUsage();
-        }
-        return totalSize;
+        return 64 + (long) groupData.size() * perGroupMemoryUsage;
+    }
+
+    @Override
+    public long consumeMemoryDelta() {
+        int currentCount = groupData.size();
+        int newGroups = currentCount - lastReportedGroupCount;
+        lastReportedGroupCount = currentCount;
+        return newGroups * perGroupMemoryUsage;
     }
 
     @Override

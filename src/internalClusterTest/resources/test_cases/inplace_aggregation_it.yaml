@@ -1,10 +1,10 @@
-# Streaming Aggregation Integration Test
-# Validates that streaming aggregation produces identical results to unfold aggregation
+# Inplace Aggregation Integration Test
+# Validates that inplace aggregation produces identical results to unfold aggregation
 # for eligible queries (fetch | sum/min/max/avg)
 
 test_setup:
-  name: "Streaming Aggregation Integration Test"
-  description: "Tests streaming aggregation correctness for sum, min, max, avg"
+  name: "Inplace Aggregation Integration Test"
+  description: "Tests inplace aggregation correctness for sum, min, max, avg"
 
   index_configs:
     - name: "streaming_agg_test"
@@ -12,7 +12,7 @@ test_setup:
       replicas: 0
 
 test_case:
-  name: "Streaming Aggregation Correctness"
+  name: "Inplace Aggregation Correctness"
 
   input_data_list:
     - index_name: "streaming_agg_test"

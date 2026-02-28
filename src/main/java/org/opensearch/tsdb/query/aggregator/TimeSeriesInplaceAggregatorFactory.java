@@ -19,26 +19,26 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Factory for creating time series streaming aggregator instances.
+ * Factory for creating time series inplace aggregator instances.
  *
- * <p>This factory creates {@link TimeSeriesStreamingAggregator} instances with the
+ * <p>This factory creates {@link TimeSeriesInplaceAggregator} instances with the
  * specified configuration including aggregation type, grouping tags, time range,
- * and step size. It handles the creation and configuration of streaming aggregators
+ * and step size. It handles the creation and configuration of inplace aggregators
  * for optimized time series data processing.</p>
  *
  * <h2>Key Responsibilities:</h2>
  * <ul>
  *   <li><strong>Aggregator Creation:</strong> Creates properly configured
- *       {@link TimeSeriesStreamingAggregator} instances</li>
+ *       {@link TimeSeriesInplaceAggregator} instances</li>
  *   <li><strong>Configuration Management:</strong> Manages aggregation type,
  *       grouping tags, time range, and step size configuration</li>
  *   <li><strong>Context Handling:</strong> Provides appropriate search context
  *       and parent aggregator relationships</li>
  *   <li><strong>CSS Support:</strong> Enables concurrent segment search for
- *       streaming aggregations (safe for all types)</li>
+ *       inplace aggregations (safe for all types)</li>
  * </ul>
  *
- * <h2>Streaming Optimizations:</h2>
+ * <h2>Inplace Optimizations:</h2>
  * <ul>
  *   <li><strong>Memory Efficiency:</strong> Direct array operations without
  *       intermediate TimeSeries object creation</li>
@@ -47,16 +47,16 @@ import java.util.Map;
  *   <li><strong>Single Pass:</strong> No post-collection phase required</li>
  * </ul>
  */
-public class TimeSeriesStreamingAggregatorFactory extends AggregatorFactory {
+public class TimeSeriesInplaceAggregatorFactory extends AggregatorFactory {
 
-    private final StreamingAggregationType aggregationType;
+    private final InplaceAggregationType aggregationType;
     private final List<String> groupByTags;
     private final long minTimestamp;
     private final long maxTimestamp;
     private final long step;
 
     /**
-     * Create a time series streaming aggregator factory.
+     * Create a time series inplace aggregator factory.
      *
      * @param name The name of the aggregator
      * @param queryShardContext The query shard context
@@ -70,13 +70,13 @@ public class TimeSeriesStreamingAggregatorFactory extends AggregatorFactory {
      * @param step The step size for timestamp alignment
      * @throws IOException If an error occurs during initialization
      */
-    public TimeSeriesStreamingAggregatorFactory(
+    public TimeSeriesInplaceAggregatorFactory(
         String name,
         QueryShardContext queryShardContext,
         AggregatorFactory parent,
         AggregatorFactories.Builder subFactoriesBuilder,
         Map<String, Object> metadata,
-        StreamingAggregationType aggregationType,
+        InplaceAggregationType aggregationType,
         List<String> groupByTags,
         long minTimestamp,
         long maxTimestamp,
@@ -97,7 +97,7 @@ public class TimeSeriesStreamingAggregatorFactory extends AggregatorFactory {
         CardinalityUpperBound cardinality,
         Map<String, Object> metadata
     ) throws IOException {
-        return new TimeSeriesStreamingAggregator(
+        return new TimeSeriesInplaceAggregator(
             name,
             factories,
             aggregationType,
@@ -123,9 +123,9 @@ public class TimeSeriesStreamingAggregatorFactory extends AggregatorFactory {
     /**
      * Get the configured aggregation type.
      *
-     * @return The streaming aggregation type
+     * @return The inplace aggregation type
      */
-    public StreamingAggregationType getAggregationType() {
+    public InplaceAggregationType getAggregationType() {
         return aggregationType;
     }
 

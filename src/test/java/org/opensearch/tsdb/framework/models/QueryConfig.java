@@ -22,7 +22,7 @@ import org.opensearch.tsdb.query.rest.ResolvedPartitions;
  * cluster-qualified index patterns (e.g., "cluster_a:metrics,cluster_b:metrics").
  * The optional {@code ccs_minimize_roundtrips} field controls CCS optimization behavior.
  *
- * <p>The test framework automatically runs every success query with both streaming
+ * <p>The test framework automatically runs every success query with both inplace_aggregation
  * enabled and disabled, verifying identical results.
  *
  * <h3>CCS Query Example:</h3>
@@ -45,14 +45,14 @@ import org.opensearch.tsdb.query.rest.ResolvedPartitions;
  * @param config Time configuration
  * @param indices Target indices (comma-separated, may include cluster prefixes)
  * @param disablePushdown Optional flag to disable query pushdown
- * @param streaming Optional flag to enable streaming aggregation
+ * @param inplaceAggregation Optional flag to enable inplace aggregation
  * @param ccsMinimizeRoundtrips Optional CCS minimize roundtrips setting (default: true)
  * @param resolvedPartitions Optional pre-resolved partitions
  * @param expected Expected response for validation
  */
 public record QueryConfig(@JsonProperty("name") String name, @JsonProperty("type") QueryType type, @JsonProperty("query") String query,
     @JsonProperty("time_config") TimeConfig config, @JsonProperty("indices") String indices,
-    @JsonProperty("disable_pushdown") Boolean disablePushdown, @JsonProperty("streaming") Boolean streaming,
+    @JsonProperty("disable_pushdown") Boolean disablePushdown, @JsonProperty("inplace_aggregation") Boolean inplaceAggregation,
     @JsonProperty("ccs_minimize_roundtrips") Boolean ccsMinimizeRoundtrips,
     @JsonProperty("resolved_partitions") @JsonDeserialize(using = ResolvedPartitionsYamlAdapter.Deserializer.class) ResolvedPartitions resolvedPartitions,
     @JsonProperty("expected") ExpectedResponse expected) {
@@ -65,24 +65,24 @@ public record QueryConfig(@JsonProperty("name") String name, @JsonProperty("type
     }
 
     /**
-     * Get the streaming flag, defaulting to false if not specified.
+     * Get the inplace aggregation flag, defaulting to false if not specified.
      */
-    public boolean isStreaming() {
-        return streaming != null && streaming;
+    public boolean isInplaceAggregation() {
+        return inplaceAggregation != null && inplaceAggregation;
     }
 
     /**
-     * Create a copy of this QueryConfig with streaming enabled.
+     * Create a copy of this QueryConfig with inplace aggregation enabled.
      */
-    public QueryConfig withStreaming(boolean streamingEnabled) {
+    public QueryConfig withInplaceAggregation(boolean inplaceAggregationEnabled) {
         return new QueryConfig(
-            name + " (streaming)",
+            name + " (inplace_aggregation)",
             type,
             query,
             config,
             indices,
             disablePushdown,
-            streamingEnabled,
+            inplaceAggregationEnabled,
             ccsMinimizeRoundtrips,
             resolvedPartitions,
             expected

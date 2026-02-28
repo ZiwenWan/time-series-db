@@ -42,8 +42,8 @@ public class M3QLTranslator implements QueryConfigTranslator {
         // Get pushdown setting from query config (default is pushdown enabled, so disablePushdown=false means pushdown=true)
         boolean pushdown = !queryConfig.isDisablePushdown();
 
-        // Get streaming setting from query config (default is disabled)
-        boolean streaming = queryConfig.isStreaming();
+        // Get inplace aggregation setting from query config (default is disabled)
+        boolean inplaceAggregation = queryConfig.isInplaceAggregation();
 
         // Create M3OSTranslator parameters (no federation metadata for tests)
         M3OSTranslator.Params params = new M3OSTranslator.Params(
@@ -54,7 +54,7 @@ public class M3QLTranslator implements QueryConfigTranslator {
             pushdown,
             false,
             null,     // federationMetadata
-            streaming
+            inplaceAggregation
         );
 
         // Translate M3QL query string to SearchSourceBuilder
