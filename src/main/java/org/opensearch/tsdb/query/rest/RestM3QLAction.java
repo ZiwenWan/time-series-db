@@ -133,7 +133,6 @@ public class RestM3QLAction extends BaseTSDBAction {
 
     // M3QL-specific parameter names
     private static final String RESOLVED_PARTITIONS_PARAM = "resolved_partitions";
-    private static final String STREAMING_PARAM = "streaming";
 
     // Default parameter values
     private static final String DEFAULT_START_TIME = "now-5m";
@@ -206,7 +205,7 @@ public class RestM3QLAction extends BaseTSDBAction {
         boolean ccsMinimizeRoundTrips = resolveCcsMinimizeRoundTrips(request);
         final boolean profileParam = request.paramAsBoolean(PROFILE_PARAM, false);
         final boolean includeMetadataParam = request.paramAsBoolean(INCLUDE_METADATA_PARAM, false);
-        final boolean streamingParam = request.paramAsBoolean(STREAMING_PARAM, false);
+        final boolean streamingParam = resolveStreamingParam(request);
 
         // Parse request parameters (may be async for remote index settings fetch)
         return channel -> {
@@ -468,7 +467,7 @@ public class RestM3QLAction extends BaseTSDBAction {
         boolean profile = request.paramAsBoolean(PROFILE_PARAM, false);
         boolean includeMetadata = request.paramAsBoolean(INCLUDE_METADATA_PARAM, false);
         boolean ccsMinimizeRoundTrips = resolveCcsMinimizeRoundTrips(request);
-        boolean streaming = request.paramAsBoolean(STREAMING_PARAM, false);
+        boolean streaming = resolveStreamingParam(request);
 
         // Extract resolved partitions from request body (implements FederationMetadata)
         FederationMetadata federationMetadata = (requestBody != null) ? requestBody.resolvedPartitions() : null;
