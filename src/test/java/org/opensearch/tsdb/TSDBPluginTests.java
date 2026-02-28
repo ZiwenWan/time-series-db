@@ -42,7 +42,7 @@ import org.opensearch.test.IndexSettingsModule;
 import org.opensearch.test.OpenSearchTestCase;
 import org.opensearch.tsdb.query.aggregator.TSDBStatsAggregationBuilder;
 import org.opensearch.tsdb.query.aggregator.TimeSeriesCoordinatorAggregationBuilder;
-import org.opensearch.tsdb.query.aggregator.TimeSeriesStreamingAggregationBuilder;
+import org.opensearch.tsdb.query.aggregator.TimeSeriesInplaceAggregationBuilder;
 import org.opensearch.tsdb.query.aggregator.TimeSeriesUnfoldAggregationBuilder;
 import org.opensearch.tsdb.query.rest.RestM3QLAction;
 import org.opensearch.tsdb.query.rest.RestPromQLAction;
@@ -119,8 +119,8 @@ public class TSDBPluginTests extends OpenSearchTestCase {
         );
         assertTrue("Should contain TSDB_ENGINE_FORCE_NO_PUSHDOWN setting", settings.contains(TSDBPlugin.TSDB_ENGINE_FORCE_NO_PUSHDOWN));
         assertTrue(
-            "Should contain TSDB_ENGINE_STREAMING_AGGREGATION_ENABLED setting",
-            settings.contains(TSDBPlugin.TSDB_ENGINE_STREAMING_AGGREGATION_ENABLED)
+            "Should contain TSDB_ENGINE_INPLACE_AGGREGATION_ENABLED setting",
+            settings.contains(TSDBPlugin.TSDB_ENGINE_INPLACE_AGGREGATION_ENABLED)
         );
         assertTrue(
             "Should contain TSDB_ENGINE_ENABLE_INTERNAL_AGG_CHUNK_COMPRESSION setting",
@@ -359,8 +359,8 @@ public class TSDBPluginTests extends OpenSearchTestCase {
         assertTrue("Should contain TimeSeriesUnfoldAggregationBuilder", aggregationNames.contains(TimeSeriesUnfoldAggregationBuilder.NAME));
         assertTrue("Should contain TSDBStatsAggregationBuilder", aggregationNames.contains(TSDBStatsAggregationBuilder.NAME));
         assertTrue(
-            "Should contain TimeSeriesStreamingAggregationBuilder",
-            aggregationNames.contains(TimeSeriesStreamingAggregationBuilder.NAME)
+            "Should contain TimeSeriesInplaceAggregationBuilder",
+            aggregationNames.contains(TimeSeriesInplaceAggregationBuilder.NAME)
         );
     }
 

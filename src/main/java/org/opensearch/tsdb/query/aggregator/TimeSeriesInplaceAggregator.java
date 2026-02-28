@@ -41,10 +41,10 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * Streaming aggregator that processes "fetch | aggregation" queries without reconstructing full time series.
+ * Inplace aggregator that processes "fetch | aggregation" queries without reconstructing full time series.
  *
- * <p>This aggregator optimizes simple fetch + aggregation queries by processing data in a streaming
- * manner, avoiding the memory overhead of creating intermediate TimeSeries objects. It supports
+ * <p>This aggregator optimizes simple fetch + aggregation queries by processing data in an inplace
+ * fashion, avoiding the memory overhead of creating intermediate TimeSeries objects. It supports
  * sum, min, max, and avg aggregations with optional label-based grouping.</p>
  *
  * <h2>Key Optimizations:</h2>
@@ -72,25 +72,24 @@ import java.util.Map;
  *
  * @since 0.0.1
  */
-public class TimeSeriesStreamingAggregator extends BucketsAggregator {
+public class TimeSeriesInplaceAggregator extends BucketsAggregator {
 
-    private static final Logger logger = LogManager.getLogger(TimeSeriesStreamingAggregator.class);
+    private static final Logger logger = LogManager.getLogger(TimeSeriesInplaceAggregator.class);
 
     // Core aggregation configuration
-    private final StreamingAggregationType aggregationType;
+    private final InplaceAggregationType aggregationType;
     private final List<String> groupByTags;
     private final long minTimestamp;
     private final long maxTimestamp;
     private final long step;
     private final int timeArraySize;
 
-    // Streaming state per bucket
-    private final Map<Long, StreamingAggregationState> bucketStates = new HashMap<>();
+    // Inplace aggregation state per bucket
+    private final Map<Long, InplaceAggregationState> bucketStates = new HashMap<>();
 
-    // Circuit breaker tracking — track previous memory per bucket to compute deltas
+    // Circuit breaker tracking
     private long circuitBreakerBytes = 0;
     private long maxCircuitBreakerBytes = 0;
-    private final Map<Long, Long> lastStateMemoryByBucket = new HashMap<>();
 
     /** Batches circuit breaker updates at {@link CircuitBreakerBatcher#BATCH_THRESHOLD_BYTES} (5 MB). */
     private final CircuitBreakerBatcher circuitBreakerBatcher;
@@ -101,7 +100,7 @@ public class TimeSeriesStreamingAggregator extends BucketsAggregator {
     private int closedDocsProcessed = 0;
 
     /**
-     * Create a time series streaming aggregator.
+     * Create a time series inplace aggregator.
      *
      * @param name The name of the aggregator
      * @param factories The sub-aggregation factories
@@ -116,10 +115,10 @@ public class TimeSeriesStreamingAggregator extends BucketsAggregator {
      * @param metadata The aggregation metadata
      * @throws IOException If an error occurs during initialization
      */
-    public TimeSeriesStreamingAggregator(
+    public TimeSeriesInplaceAggregator(
         String name,
         AggregatorFactories factories,
-        StreamingAggregationType aggregationType,
+        InplaceAggregationType aggregationType,
         List<String> groupByTags,
         SearchContext context,
         Aggregator parent,
@@ -143,7 +142,7 @@ public class TimeSeriesStreamingAggregator extends BucketsAggregator {
 
         if (logger.isDebugEnabled()) {
             logger.debug(
-                "Created streaming aggregator: type={}, groupByTags={}, timeRange=[{}, {}], step={}, arraySize={}",
+                "Created inplace aggregator: type={}, groupByTags={}, timeRange=[{}, {}], step={}, arraySize={}",
                 aggregationType.getDisplayName(),
                 groupByTags,
                 minTimestamp,
@@ -178,7 +177,7 @@ public class TimeSeriesStreamingAggregator extends BucketsAggregator {
             return sub;
         }
 
-        return new StreamingLeafBucketCollector(sub, ctx, tsdbLeafReader);
+        return new InplaceLeafBucketCollector(sub, ctx, tsdbLeafReader);
     }
 
     @Override
@@ -188,13 +187,13 @@ public class TimeSeriesStreamingAggregator extends BucketsAggregator {
 
         InternalAggregation[] results = new InternalAggregation[bucketOrds.length];
 
-        // Create the reduce stage that matches our streaming aggregation type,
+        // Create the reduce stage that matches our inplace aggregation type,
         // so that cross-shard reduction properly re-aggregates partial results.
         UnaryPipelineStage reduceStage = createReduceStage();
 
         for (int i = 0; i < bucketOrds.length; i++) {
             long bucketOrd = bucketOrds[i];
-            StreamingAggregationState state = bucketStates.get(bucketOrd);
+            InplaceAggregationState state = bucketStates.get(bucketOrd);
 
             List<TimeSeries> timeSeries = state != null ? state.getFinalResults(minTimestamp, maxTimestamp, step) : Collections.emptyList();
 
@@ -205,7 +204,7 @@ public class TimeSeriesStreamingAggregator extends BucketsAggregator {
     }
 
     /**
-     * Create the pipeline stage that corresponds to this streaming aggregation type.
+     * Create the pipeline stage that corresponds to this inplace aggregation type.
      * This stage is used during cross-shard reduce to properly combine partial results.
      */
     private UnaryPipelineStage createReduceStage() {
@@ -220,7 +219,7 @@ public class TimeSeriesStreamingAggregator extends BucketsAggregator {
             case AVG:
                 return tags.isEmpty() ? new AvgStage() : new AvgStage(tags);
             default:
-                throw new IllegalStateException("Unknown streaming aggregation type: " + aggregationType);
+                throw new IllegalStateException("Unknown inplace aggregation type: " + aggregationType);
         }
     }
 
@@ -248,7 +247,7 @@ public class TimeSeriesStreamingAggregator extends BucketsAggregator {
                 maxCircuitBreakerBytes = Math.max(maxCircuitBreakerBytes, circuitBreakerBytes);
             } catch (CircuitBreakingException e) {
                 logger.warn(
-                    "Circuit breaker tripped in streaming aggregator '{}': limit={} MiB, bytes={}, total={}, "
+                    "Circuit breaker tripped in inplace aggregator '{}': limit={} MiB, bytes={}, total={}, "
                         + "timeRange=[{}, {}], step={}, type={}",
                     name(),
                     String.format(Locale.ROOT, "%.2f", e.getByteLimit() / (1024.0 * 1024.0)),
@@ -272,7 +271,7 @@ public class TimeSeriesStreamingAggregator extends BucketsAggregator {
 
         logger.debug(
             () -> new ParameterizedMessage(
-                "Closing streaming aggregator '{}': total circuit breaker bytes tracked={}, peak={}",
+                "Closing inplace aggregator '{}': total circuit breaker bytes tracked={}, peak={}",
                 name(),
                 RamUsageEstimator.humanReadableUnits(circuitBreakerBytes),
                 RamUsageEstimator.humanReadableUnits(maxCircuitBreakerBytes)
@@ -286,28 +285,28 @@ public class TimeSeriesStreamingAggregator extends BucketsAggregator {
     }
 
     /**
-     * Create streaming state for a bucket based on aggregation configuration.
+     * Create inplace aggregation state for a bucket based on aggregation configuration.
      */
-    private StreamingAggregationState createStreamingState() {
+    private InplaceAggregationState createInplaceAggregationState() {
         if (groupByTags == null || groupByTags.isEmpty()) {
             // No-tag case: single time series result
-            return new NoTagStreamingState(aggregationType, timeArraySize, minTimestamp, maxTimestamp, step);
+            return new NoTagInplaceAggregationState(aggregationType, timeArraySize, minTimestamp, maxTimestamp, step);
         } else {
             // Tag-based case: grouped time series results
-            return new TagStreamingState(aggregationType, groupByTags, timeArraySize, minTimestamp, maxTimestamp, step);
+            return new TagInplaceAggregationState(aggregationType, groupByTags, timeArraySize, minTimestamp, maxTimestamp, step);
         }
     }
 
     /**
-     * Leaf bucket collector that processes documents in streaming fashion.
+     * Leaf bucket collector that processes documents in inplace fashion.
      */
-    private class StreamingLeafBucketCollector extends LeafBucketCollectorBase {
+    private class InplaceLeafBucketCollector extends LeafBucketCollectorBase {
 
         private final LeafBucketCollector subCollector;
         private final TSDBLeafReader tsdbLeafReader;
         private final TSDBDocValues tsdbDocValues;
 
-        public StreamingLeafBucketCollector(LeafBucketCollector sub, LeafReaderContext ctx, TSDBLeafReader tsdbLeafReader)
+        public InplaceLeafBucketCollector(LeafBucketCollector sub, LeafReaderContext ctx, TSDBLeafReader tsdbLeafReader)
             throws IOException {
             super(sub, ctx);
             this.subCollector = sub;
@@ -317,20 +316,17 @@ public class TimeSeriesStreamingAggregator extends BucketsAggregator {
 
         @Override
         public void collect(int doc, long bucket) throws IOException {
-            // Get or create streaming state for this bucket
-            StreamingAggregationState state = bucketStates.computeIfAbsent(bucket, k -> createStreamingState());
+            // Get or create inplace aggregation state for this bucket
+            InplaceAggregationState state = bucketStates.computeIfAbsent(bucket, k -> createInplaceAggregationState());
 
-            // Process document in streaming fashion
+            // Process document in inplace fashion
             state.processDocument(doc, tsdbDocValues, tsdbLeafReader);
 
-            // Track memory usage for circuit breaker — pass only the delta, not the total
-            long currentMemory = state.getEstimatedMemoryUsage();
-            long previousMemory = lastStateMemoryByBucket.getOrDefault(bucket, 0L);
-            long delta = currentMemory - previousMemory;
+            // Track memory usage for circuit breaker — incremental delta tracking
+            long delta = state.consumeMemoryDelta();
             if (delta > 0) {
                 trackCircuitBreakerBytes(delta);
             }
-            lastStateMemoryByBucket.put(bucket, currentMemory);
 
             // Track metrics
             boolean isLiveReader = tsdbLeafReader instanceof LiveSeriesIndexLeafReader;

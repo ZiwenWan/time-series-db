@@ -25,16 +25,16 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * Aggregation builder for time series streaming aggregations.
+ * Aggregation builder for time series inplace aggregations.
  *
- * <p>This builder creates {@link TimeSeriesStreamingAggregator} instances that process
- * "fetch | aggregation" queries in a streaming fashion without reconstructing full
+ * <p>This builder creates {@link TimeSeriesInplaceAggregator} instances that process
+ * "fetch | aggregation" queries in an inplace fashion without reconstructing full
  * time series in memory. It supports sum, min, max, and avg aggregations with
  * optional label-based grouping.</p>
  *
  * <h2>Key Features:</h2>
  * <ul>
- *   <li><strong>Streaming Processing:</strong> Single-pass aggregation with direct array operations</li>
+ *   <li><strong>Inplace Processing:</strong> Single-pass aggregation with direct array operations</li>
  *   <li><strong>Memory Efficiency:</strong> Eliminates intermediate TimeSeries objects</li>
  *   <li><strong>Flexible Grouping:</strong> Supports global and tag-based aggregations</li>
  *   <li><strong>Label Optimization:</strong> Skips label reading for global aggregations</li>
@@ -50,8 +50,8 @@ import java.util.Objects;
  *
  * <h2>Usage Example:</h2>
  * <pre>{@code
- * TimeSeriesStreamingAggregationBuilder builder = new TimeSeriesStreamingAggregationBuilder("my_aggregation")
- *     .aggregationType(StreamingAggregationType.SUM)
+ * TimeSeriesInplaceAggregationBuilder builder = new TimeSeriesInplaceAggregationBuilder("my_aggregation")
+ *     .aggregationType(InplaceAggregationType.SUM)
  *     .groupByTags(List.of("region", "service"))
  *     .minTimestamp(1000000L)
  *     .maxTimestamp(2000000L)
@@ -59,20 +59,20 @@ import java.util.Objects;
  * }</pre>
  *
  * <h2>Configuration:</h2>
- * <p>Streaming aggregation is enabled via the {@code streaming} query parameter.
+ * <p>Inplace aggregation is enabled via the {@code inplace_aggregation} query parameter.
  * When enabled, eligible queries will use this builder instead of the standard
  * TimeSeriesUnfoldAggregator.</p>
  */
-public class TimeSeriesStreamingAggregationBuilder extends AbstractTimeSeriesAggregationBuilder<TimeSeriesStreamingAggregationBuilder> {
+public class TimeSeriesInplaceAggregationBuilder extends AbstractTimeSeriesAggregationBuilder<TimeSeriesInplaceAggregationBuilder> {
     /** The name of the aggregation type */
-    public static final String NAME = "time_series_streaming";
+    public static final String NAME = "time_series_inplace";
 
-    // Streaming-specific parameters
-    private final StreamingAggregationType aggregationType;
+    // Inplace-specific parameters
+    private final InplaceAggregationType aggregationType;
     private final List<String> groupByTags;
 
     /**
-     * Create a time series streaming aggregation builder.
+     * Create a time series inplace aggregation builder.
      *
      * @param name The name of the aggregation
      * @param aggregationType The type of aggregation (sum, min, max, avg)
@@ -82,9 +82,9 @@ public class TimeSeriesStreamingAggregationBuilder extends AbstractTimeSeriesAgg
      * @param step The step size for timestamp alignment
      * @throws IllegalArgumentException if maxTimestamp is not greater than minTimestamp
      */
-    public TimeSeriesStreamingAggregationBuilder(
+    public TimeSeriesInplaceAggregationBuilder(
         String name,
-        StreamingAggregationType aggregationType,
+        InplaceAggregationType aggregationType,
         List<String> groupByTags,
         long minTimestamp,
         long maxTimestamp,
@@ -101,9 +101,9 @@ public class TimeSeriesStreamingAggregationBuilder extends AbstractTimeSeriesAgg
      * @param in The stream input to read from
      * @throws IOException If an error occurs during reading
      */
-    public TimeSeriesStreamingAggregationBuilder(StreamInput in) throws IOException {
+    public TimeSeriesInplaceAggregationBuilder(StreamInput in) throws IOException {
         super(in);
-        this.aggregationType = StreamingAggregationType.values()[in.readVInt()];
+        this.aggregationType = InplaceAggregationType.values()[in.readVInt()];
 
         // Read optional group-by tags using boolean flag pattern
         boolean hasGroupByTags = in.readBoolean();
@@ -119,8 +119,8 @@ public class TimeSeriesStreamingAggregationBuilder extends AbstractTimeSeriesAgg
      * @param factoriesBuilder The sub-aggregations builder
      * @param metadata The aggregation metadata
      */
-    protected TimeSeriesStreamingAggregationBuilder(
-        TimeSeriesStreamingAggregationBuilder clone,
+    protected TimeSeriesInplaceAggregationBuilder(
+        TimeSeriesInplaceAggregationBuilder clone,
         Builder factoriesBuilder,
         Map<String, Object> metadata
     ) {
@@ -146,7 +146,7 @@ public class TimeSeriesStreamingAggregationBuilder extends AbstractTimeSeriesAgg
 
     @Override
     protected AggregationBuilder shallowCopy(Builder factoriesBuilder, Map<String, Object> metadata) {
-        return new TimeSeriesStreamingAggregationBuilder(this, factoriesBuilder, metadata);
+        return new TimeSeriesInplaceAggregationBuilder(this, factoriesBuilder, metadata);
     }
 
     @Override
@@ -154,7 +154,7 @@ public class TimeSeriesStreamingAggregationBuilder extends AbstractTimeSeriesAgg
         throws IOException {
         validateTsdbEnabled(queryShardContext);
 
-        return new TimeSeriesStreamingAggregatorFactory(
+        return new TimeSeriesInplaceAggregatorFactory(
             name,
             queryShardContext,
             parent,
@@ -188,10 +188,10 @@ public class TimeSeriesStreamingAggregationBuilder extends AbstractTimeSeriesAgg
     }
 
     /**
-     * Parse TimeSeriesStreamingAggregationBuilder from XContent.
+     * Parse TimeSeriesInplaceAggregationBuilder from XContent.
      */
-    public static TimeSeriesStreamingAggregationBuilder parse(String aggregationName, XContentParser parser) throws IOException {
-        StreamingAggregationType aggregationType = null;
+    public static TimeSeriesInplaceAggregationBuilder parse(String aggregationName, XContentParser parser) throws IOException {
+        InplaceAggregationType aggregationType = null;
         List<String> groupByTags = null;
         Long minTimestamp = null;
         Long maxTimestamp = null;
@@ -206,7 +206,7 @@ public class TimeSeriesStreamingAggregationBuilder extends AbstractTimeSeriesAgg
             } else if (token == XContentParser.Token.VALUE_STRING) {
                 if ("aggregation_type".equals(currentFieldName)) {
                     try {
-                        aggregationType = StreamingAggregationType.valueOf(parser.text().toUpperCase(Locale.ROOT));
+                        aggregationType = InplaceAggregationType.valueOf(parser.text().toUpperCase(Locale.ROOT));
                     } catch (IllegalArgumentException e) {
                         throw new IllegalArgumentException(
                             "Invalid aggregation_type '" + parser.text() + "'. Supported types: sum, min, max, avg"
@@ -254,7 +254,7 @@ public class TimeSeriesStreamingAggregationBuilder extends AbstractTimeSeriesAgg
             throw new IllegalArgumentException("Required parameter 'step' is missing for aggregation '" + aggregationName + "'");
         }
 
-        return new TimeSeriesStreamingAggregationBuilder(aggregationName, aggregationType, groupByTags, minTimestamp, maxTimestamp, step);
+        return new TimeSeriesInplaceAggregationBuilder(aggregationName, aggregationType, groupByTags, minTimestamp, maxTimestamp, step);
     }
 
     @Override
@@ -269,7 +269,7 @@ public class TimeSeriesStreamingAggregationBuilder extends AbstractTimeSeriesAgg
             return false;
         }
 
-        TimeSeriesStreamingAggregationBuilder that = (TimeSeriesStreamingAggregationBuilder) obj;
+        TimeSeriesInplaceAggregationBuilder that = (TimeSeriesInplaceAggregationBuilder) obj;
         return aggregationType == that.aggregationType && Objects.equals(groupByTags, that.groupByTags) && timeRangeEquals(that);
     }
 
@@ -283,7 +283,7 @@ public class TimeSeriesStreamingAggregationBuilder extends AbstractTimeSeriesAgg
     }
 
     // Getters for accessing configuration
-    public StreamingAggregationType getAggregationType() {
+    public InplaceAggregationType getAggregationType() {
         return aggregationType;
     }
 

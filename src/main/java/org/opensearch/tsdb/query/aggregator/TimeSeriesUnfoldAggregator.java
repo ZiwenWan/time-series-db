@@ -195,7 +195,7 @@ public class TimeSeriesUnfoldAggregator extends BucketsAggregator {
         }
 
         // TODO: Extract TSDBLeafReader unwrap + time range check to a shared base class
-        // (see also TimeSeriesStreamingAggregator.getLeafCollector())
+        // (see also TimeSeriesInplaceAggregator.getLeafCollector())
         // Check if this leaf reader can be pruned based on time range
         TSDBLeafReader tsdbLeafReader = TSDBLeafReader.unwrapLeafReader(ctx.reader());
         if (tsdbLeafReader == null) {

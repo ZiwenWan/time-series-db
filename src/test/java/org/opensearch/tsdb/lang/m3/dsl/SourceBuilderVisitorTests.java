@@ -60,8 +60,8 @@ import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.MockFetchPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.MockFetchLinePlanNode;
 import org.opensearch.tsdb.lang.m3.stage.MovingStage;
 import org.opensearch.tsdb.query.aggregator.TimeSeriesCoordinatorAggregationBuilder;
-import org.opensearch.tsdb.query.aggregator.TimeSeriesStreamingAggregationBuilder;
-import org.opensearch.tsdb.query.aggregator.StreamingAggregationType;
+import org.opensearch.tsdb.query.aggregator.TimeSeriesInplaceAggregationBuilder;
+import org.opensearch.tsdb.query.aggregator.InplaceAggregationType;
 import org.opensearch.tsdb.query.aggregator.TimeSeriesUnfoldAggregationBuilder;
 import org.opensearch.tsdb.query.federation.FederationMetadata;
 import org.opensearch.tsdb.query.rest.ResolvedPartitions;
@@ -99,7 +99,7 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
         true,     // pushdown
         true,     // profile
         null,     // federationMetadata (no federation in tests)
-        false     // streaming
+        false     // inplace_aggregation
     );
 
     private SourceBuilderVisitor visitor;
@@ -1314,13 +1314,13 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
         assertEquals("OffsetPlanNode must have exactly one child", exception.getMessage());
     }
 
-    // ========== Streaming Aggregation Path Tests ==========
+    // ========== Inplace Aggregation Path Tests ==========
 
     /**
-     * Test that streaming=true with a single SUM aggregation produces TimeSeriesStreamingAggregationBuilder.
+     * Test that inplace_aggregation=true with a single SUM aggregation produces TimeSeriesInplaceAggregationBuilder.
      */
-    public void testStreamingEligibleSumAggregation() {
-        M3OSTranslator.Params streamingParams = new M3OSTranslator.Params(
+    public void testInplaceEligibleSumAggregation() {
+        M3OSTranslator.Params inplaceParams = new M3OSTranslator.Params(
             Constants.Time.DEFAULT_TIME_UNIT,
             1000000L,
             2000000L,
@@ -1328,31 +1328,31 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
             true,
             false,
             null,
-            true // streaming enabled
+            true // inplace_aggregation enabled
         );
-        SourceBuilderVisitor streamingVisitor = new SourceBuilderVisitor(streamingParams);
+        SourceBuilderVisitor inplaceVisitor = new SourceBuilderVisitor(inplaceParams);
 
         AggregationPlanNode aggNode = new AggregationPlanNode(1, AggregationType.SUM, List.of("region"));
         aggNode.addChild(createMockFetchNode(2));
 
-        SourceBuilderVisitor.ComponentHolder result = streamingVisitor.visit(aggNode);
+        SourceBuilderVisitor.ComponentHolder result = inplaceVisitor.visit(aggNode);
         SearchSourceBuilder builder = result.toSearchSourceBuilder();
 
         Collection<AggregationBuilder> aggregations = builder.aggregations().getAggregatorFactories();
         assertEquals(1, aggregations.size());
         AggregationBuilder aggBuilder = aggregations.iterator().next();
-        assertTrue("Should use streaming builder for eligible SUM", aggBuilder instanceof TimeSeriesStreamingAggregationBuilder);
+        assertTrue("Should use inplace builder for eligible SUM", aggBuilder instanceof TimeSeriesInplaceAggregationBuilder);
 
-        TimeSeriesStreamingAggregationBuilder streamingBuilder = (TimeSeriesStreamingAggregationBuilder) aggBuilder;
-        assertEquals(StreamingAggregationType.SUM, streamingBuilder.getAggregationType());
-        assertEquals(List.of("region"), streamingBuilder.getGroupByTags());
+        TimeSeriesInplaceAggregationBuilder inplaceBuilder = (TimeSeriesInplaceAggregationBuilder) aggBuilder;
+        assertEquals(InplaceAggregationType.SUM, inplaceBuilder.getAggregationType());
+        assertEquals(List.of("region"), inplaceBuilder.getGroupByTags());
     }
 
     /**
-     * Test streaming path with MIN aggregation.
+     * Test inplace path with MIN aggregation.
      */
-    public void testStreamingEligibleMinAggregation() {
-        M3OSTranslator.Params streamingParams = new M3OSTranslator.Params(
+    public void testInplaceEligibleMinAggregation() {
+        M3OSTranslator.Params inplaceParams = new M3OSTranslator.Params(
             Constants.Time.DEFAULT_TIME_UNIT,
             1000000L,
             2000000L,
@@ -1362,24 +1362,24 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
             null,
             true
         );
-        SourceBuilderVisitor streamingVisitor = new SourceBuilderVisitor(streamingParams);
+        SourceBuilderVisitor inplaceVisitor = new SourceBuilderVisitor(inplaceParams);
 
         AggregationPlanNode aggNode = new AggregationPlanNode(1, AggregationType.MIN, List.of("host"));
         aggNode.addChild(createMockFetchNode(2));
 
-        SourceBuilderVisitor.ComponentHolder result = streamingVisitor.visit(aggNode);
+        SourceBuilderVisitor.ComponentHolder result = inplaceVisitor.visit(aggNode);
         SearchSourceBuilder builder = result.toSearchSourceBuilder();
 
         AggregationBuilder aggBuilder = builder.aggregations().getAggregatorFactories().iterator().next();
-        assertTrue("Should use streaming builder for eligible MIN", aggBuilder instanceof TimeSeriesStreamingAggregationBuilder);
-        assertEquals(StreamingAggregationType.MIN, ((TimeSeriesStreamingAggregationBuilder) aggBuilder).getAggregationType());
+        assertTrue("Should use inplace builder for eligible MIN", aggBuilder instanceof TimeSeriesInplaceAggregationBuilder);
+        assertEquals(InplaceAggregationType.MIN, ((TimeSeriesInplaceAggregationBuilder) aggBuilder).getAggregationType());
     }
 
     /**
-     * Test streaming path with MAX aggregation.
+     * Test inplace path with MAX aggregation.
      */
-    public void testStreamingEligibleMaxAggregation() {
-        M3OSTranslator.Params streamingParams = new M3OSTranslator.Params(
+    public void testInplaceEligibleMaxAggregation() {
+        M3OSTranslator.Params inplaceParams = new M3OSTranslator.Params(
             Constants.Time.DEFAULT_TIME_UNIT,
             1000000L,
             2000000L,
@@ -1389,24 +1389,24 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
             null,
             true
         );
-        SourceBuilderVisitor streamingVisitor = new SourceBuilderVisitor(streamingParams);
+        SourceBuilderVisitor inplaceVisitor = new SourceBuilderVisitor(inplaceParams);
 
         AggregationPlanNode aggNode = new AggregationPlanNode(1, AggregationType.MAX, List.of("host"));
         aggNode.addChild(createMockFetchNode(2));
 
-        SourceBuilderVisitor.ComponentHolder result = streamingVisitor.visit(aggNode);
+        SourceBuilderVisitor.ComponentHolder result = inplaceVisitor.visit(aggNode);
         SearchSourceBuilder builder = result.toSearchSourceBuilder();
 
         AggregationBuilder aggBuilder = builder.aggregations().getAggregatorFactories().iterator().next();
-        assertTrue("Should use streaming builder for eligible MAX", aggBuilder instanceof TimeSeriesStreamingAggregationBuilder);
-        assertEquals(StreamingAggregationType.MAX, ((TimeSeriesStreamingAggregationBuilder) aggBuilder).getAggregationType());
+        assertTrue("Should use inplace builder for eligible MAX", aggBuilder instanceof TimeSeriesInplaceAggregationBuilder);
+        assertEquals(InplaceAggregationType.MAX, ((TimeSeriesInplaceAggregationBuilder) aggBuilder).getAggregationType());
     }
 
     /**
-     * Test streaming path with AVG aggregation.
+     * Test inplace path with AVG aggregation.
      */
-    public void testStreamingEligibleAvgAggregation() {
-        M3OSTranslator.Params streamingParams = new M3OSTranslator.Params(
+    public void testInplaceEligibleAvgAggregation() {
+        M3OSTranslator.Params inplaceParams = new M3OSTranslator.Params(
             Constants.Time.DEFAULT_TIME_UNIT,
             1000000L,
             2000000L,
@@ -1416,24 +1416,24 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
             null,
             true
         );
-        SourceBuilderVisitor streamingVisitor = new SourceBuilderVisitor(streamingParams);
+        SourceBuilderVisitor inplaceVisitor = new SourceBuilderVisitor(inplaceParams);
 
         AggregationPlanNode aggNode = new AggregationPlanNode(1, AggregationType.AVG, List.of("host"));
         aggNode.addChild(createMockFetchNode(2));
 
-        SourceBuilderVisitor.ComponentHolder result = streamingVisitor.visit(aggNode);
+        SourceBuilderVisitor.ComponentHolder result = inplaceVisitor.visit(aggNode);
         SearchSourceBuilder builder = result.toSearchSourceBuilder();
 
         AggregationBuilder aggBuilder = builder.aggregations().getAggregatorFactories().iterator().next();
-        assertTrue("Should use streaming builder for eligible AVG", aggBuilder instanceof TimeSeriesStreamingAggregationBuilder);
-        assertEquals(StreamingAggregationType.AVG, ((TimeSeriesStreamingAggregationBuilder) aggBuilder).getAggregationType());
+        assertTrue("Should use inplace builder for eligible AVG", aggBuilder instanceof TimeSeriesInplaceAggregationBuilder);
+        assertEquals(InplaceAggregationType.AVG, ((TimeSeriesInplaceAggregationBuilder) aggBuilder).getAggregationType());
     }
 
     /**
-     * Test streaming path with global aggregation (empty tags → null groupByTags in builder).
+     * Test inplace path with global aggregation (empty tags → null groupByTags in builder).
      */
-    public void testStreamingEligibleGlobalAggregation() {
-        M3OSTranslator.Params streamingParams = new M3OSTranslator.Params(
+    public void testInplaceEligibleGlobalAggregation() {
+        M3OSTranslator.Params inplaceParams = new M3OSTranslator.Params(
             Constants.Time.DEFAULT_TIME_UNIT,
             1000000L,
             2000000L,
@@ -1443,27 +1443,27 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
             null,
             true
         );
-        SourceBuilderVisitor streamingVisitor = new SourceBuilderVisitor(streamingParams);
+        SourceBuilderVisitor inplaceVisitor = new SourceBuilderVisitor(inplaceParams);
 
         // Empty tags list → global aggregation
         AggregationPlanNode aggNode = new AggregationPlanNode(1, AggregationType.SUM, Collections.emptyList());
         aggNode.addChild(createMockFetchNode(2));
 
-        SourceBuilderVisitor.ComponentHolder result = streamingVisitor.visit(aggNode);
+        SourceBuilderVisitor.ComponentHolder result = inplaceVisitor.visit(aggNode);
         SearchSourceBuilder builder = result.toSearchSourceBuilder();
 
         AggregationBuilder aggBuilder = builder.aggregations().getAggregatorFactories().iterator().next();
-        assertTrue("Should use streaming builder for global aggregation", aggBuilder instanceof TimeSeriesStreamingAggregationBuilder);
+        assertTrue("Should use inplace builder for global aggregation", aggBuilder instanceof TimeSeriesInplaceAggregationBuilder);
 
-        TimeSeriesStreamingAggregationBuilder streamingBuilder = (TimeSeriesStreamingAggregationBuilder) aggBuilder;
-        assertNull("Global aggregation should have null groupByTags", streamingBuilder.getGroupByTags());
+        TimeSeriesInplaceAggregationBuilder inplaceBuilder = (TimeSeriesInplaceAggregationBuilder) aggBuilder;
+        assertNull("Global aggregation should have null groupByTags", inplaceBuilder.getGroupByTags());
     }
 
     /**
-     * Test that non-streaming-eligible aggregation type (COUNT) falls back to unfold.
+     * Test that non-inplace-eligible aggregation type (COUNT) falls back to unfold.
      */
-    public void testStreamingIneligibleMultipleStages() {
-        M3OSTranslator.Params streamingParams = new M3OSTranslator.Params(
+    public void testInplaceIneligibleMultipleStages() {
+        M3OSTranslator.Params inplaceParams = new M3OSTranslator.Params(
             Constants.Time.DEFAULT_TIME_UNIT,
             1000000L,
             2000000L,
@@ -1471,15 +1471,15 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
             true,
             false,
             null,
-            true // streaming enabled but aggregation type is ineligible
+            true // inplace_aggregation enabled but aggregation type is ineligible
         );
-        SourceBuilderVisitor streamingVisitor = new SourceBuilderVisitor(streamingParams);
+        SourceBuilderVisitor inplaceVisitor = new SourceBuilderVisitor(inplaceParams);
 
-        // COUNT is not a streaming-eligible aggregation type (only SUM/MIN/MAX/AVG are)
+        // COUNT is not a inplace-eligible aggregation type (only SUM/MIN/MAX/AVG are)
         AggregationPlanNode aggNode = new AggregationPlanNode(1, AggregationType.COUNT, List.of("host"));
         aggNode.addChild(createMockFetchNode(2));
 
-        SourceBuilderVisitor.ComponentHolder result = streamingVisitor.visit(aggNode);
+        SourceBuilderVisitor.ComponentHolder result = inplaceVisitor.visit(aggNode);
         SearchSourceBuilder builder = result.toSearchSourceBuilder();
 
         Collection<AggregationBuilder> aggregations = builder.aggregations().getAggregatorFactories();
@@ -1489,10 +1489,10 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
     }
 
     /**
-     * Test that streaming=false falls back to unfold even with eligible stages.
+     * Test that inplace_aggregation=false falls back to unfold even with eligible stages.
      */
-    public void testStreamingDisabledFallsBackToUnfold() {
-        // Default visitor has streaming=false
+    public void testInplaceDisabledFallsBackToUnfold() {
+        // Default visitor has inplace_aggregation=false
         AggregationPlanNode aggNode = new AggregationPlanNode(1, AggregationType.SUM, List.of("region"));
         aggNode.addChild(createMockFetchNode(2));
 
@@ -1502,7 +1502,7 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
         Collection<AggregationBuilder> aggregations = builder.aggregations().getAggregatorFactories();
         assertEquals(1, aggregations.size());
         AggregationBuilder aggBuilder = aggregations.iterator().next();
-        assertTrue("streaming=false should use unfold builder", aggBuilder instanceof TimeSeriesUnfoldAggregationBuilder);
+        assertTrue("inplace_aggregation=false should use unfold builder", aggBuilder instanceof TimeSeriesUnfoldAggregationBuilder);
     }
 
     /**
@@ -1550,7 +1550,7 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
             true,
             true,
             null,
-            false     // streaming
+            false     // inplace_aggregation
         );
         SourceBuilderVisitor truncateVisitor = new SourceBuilderVisitor(truncateParams);
 

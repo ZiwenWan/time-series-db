@@ -84,8 +84,8 @@ import org.opensearch.tsdb.lang.m3.stage.TransformNullStage;
 import org.opensearch.tsdb.lang.m3.stage.TruncateStage;
 import org.opensearch.tsdb.lang.m3.stage.UnionStage;
 import org.opensearch.tsdb.lang.m3.stage.WhereStage;
-import org.opensearch.tsdb.query.aggregator.StreamingAggregationType;
-import org.opensearch.tsdb.query.aggregator.TimeSeriesStreamingAggregationBuilder;
+import org.opensearch.tsdb.query.aggregator.InplaceAggregationType;
+import org.opensearch.tsdb.query.aggregator.TimeSeriesInplaceAggregationBuilder;
 import org.opensearch.tsdb.lang.m3.stage.summarize.BucketMapper;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.AggregationPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.AliasByTagsPlanNode;
@@ -371,7 +371,7 @@ public class SourceBuilderVisitor extends M3PlanVisitor<SourceBuilderVisitor.Com
         // TODO: Move this to a proper optimizer pass (e.g., a PlanNode optimization pass).
         // No-op stripping (like RemoveEmptyStage after fetch) should happen as a separate
         // optimization step, not inline in the visit method.
-        // removeEmpty right after fetch is a no-op — strip it to enable streaming optimization
+        // removeEmpty right after fetch is a no-op — strip it to enable inplace optimization
         if (!unfoldStages.isEmpty() && unfoldStages.get(0) instanceof RemoveEmptyStage) {
             unfoldStages.remove(0);
         }
@@ -392,23 +392,23 @@ public class SourceBuilderVisitor extends M3PlanVisitor<SourceBuilderVisitor.Com
             // we need to copy the cached result, as later there could be some in place modification of the time series
             stageStack.push(new CopyStage());
         } else {
-            // Check if eligible for streaming aggregation optimization
-            if (params.streaming() && isStreamingEligibleStages(unfoldStages)) {
-                // The single stage is a supported aggregation — use streaming
+            // Check if eligible for inplace aggregation optimization
+            if (params.inplaceAggregation() && isInplaceEligibleStages(unfoldStages)) {
+                // The single stage is a supported aggregation — use inplace
                 AbstractGroupingStage aggStage = (AbstractGroupingStage) unfoldStages.get(0);
-                StreamingAggregationType streamingType = mapStageToStreamingType(aggStage);
+                InplaceAggregationType inplaceType = mapStageToInplaceType(aggStage);
                 List<String> groupByTags = aggStage.getGroupByLabels();
 
-                TimeSeriesStreamingAggregationBuilder streamingAggregationBuilder = new TimeSeriesStreamingAggregationBuilder(
+                TimeSeriesInplaceAggregationBuilder inplaceAggregationBuilder = new TimeSeriesInplaceAggregationBuilder(
                     unfoldName,
-                    streamingType,
+                    inplaceType,
                     groupByTags.isEmpty() ? null : groupByTags,
                     fetchTimeRange.start(),
                     fetchTimeRange.end(),
                     params.step()
                 );
 
-                holder.setUnfoldAggregationBuilder(streamingAggregationBuilder);
+                holder.setUnfoldAggregationBuilder(inplaceAggregationBuilder);
             } else {
                 // Use traditional unfold aggregation builder
                 TimeSeriesUnfoldAggregationBuilder unfoldPipelineAggregationBuilder = new TimeSeriesUnfoldAggregationBuilder(
@@ -908,13 +908,13 @@ public class SourceBuilderVisitor extends M3PlanVisitor<SourceBuilderVisitor.Com
     }
 
     /**
-     * Check if unfoldStages consists of exactly one supported streaming aggregation stage.
+     * Check if unfoldStages consists of exactly one supported inplace aggregation stage.
      *
-     * TODO: Consider adding isStreamingEligible() / getStreamingAggregationType() to
+     * TODO: Consider adding isInplaceEligible() / getInplaceAggregationType() to
      * UnaryPipelineStage, or use a factory/registry pattern, instead of instanceof checks
      * in the visitor.
      */
-    private boolean isStreamingEligibleStages(List<UnaryPipelineStage> unfoldStages) {
+    private boolean isInplaceEligibleStages(List<UnaryPipelineStage> unfoldStages) {
         if (unfoldStages.size() != 1) {
             return false;
         }
@@ -923,14 +923,14 @@ public class SourceBuilderVisitor extends M3PlanVisitor<SourceBuilderVisitor.Com
     }
 
     /**
-     * Map a pipeline stage instance to the corresponding StreamingAggregationType.
+     * Map a pipeline stage instance to the corresponding InplaceAggregationType.
      */
-    private StreamingAggregationType mapStageToStreamingType(UnaryPipelineStage stage) {
-        if (stage instanceof SumStage) return StreamingAggregationType.SUM;
-        if (stage instanceof MinStage) return StreamingAggregationType.MIN;
-        if (stage instanceof MaxStage) return StreamingAggregationType.MAX;
-        if (stage instanceof AvgStage) return StreamingAggregationType.AVG;
-        throw new IllegalArgumentException("Unsupported stage for streaming: " + stage.getName());
+    private InplaceAggregationType mapStageToInplaceType(UnaryPipelineStage stage) {
+        if (stage instanceof SumStage) return InplaceAggregationType.SUM;
+        if (stage instanceof MinStage) return InplaceAggregationType.MIN;
+        if (stage instanceof MaxStage) return InplaceAggregationType.MAX;
+        if (stage instanceof AvgStage) return InplaceAggregationType.AVG;
+        throw new IllegalArgumentException("Unsupported stage for inplace aggregation: " + stage.getName());
     }
 
     private static void validateChildCountExact(M3PlanNode node, int expected) {

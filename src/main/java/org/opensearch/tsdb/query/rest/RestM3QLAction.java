@@ -205,7 +205,7 @@ public class RestM3QLAction extends BaseTSDBAction {
         boolean ccsMinimizeRoundTrips = resolveCcsMinimizeRoundTrips(request);
         final boolean profileParam = request.paramAsBoolean(PROFILE_PARAM, false);
         final boolean includeMetadataParam = request.paramAsBoolean(INCLUDE_METADATA_PARAM, false);
-        final boolean streamingParam = resolveStreamingParam(request);
+        final boolean inplaceAggregationParam = resolveInplaceAggregationParam(request);
 
         // Parse request parameters (may be async for remote index settings fetch)
         return channel -> {
@@ -467,7 +467,7 @@ public class RestM3QLAction extends BaseTSDBAction {
         boolean profile = request.paramAsBoolean(PROFILE_PARAM, false);
         boolean includeMetadata = request.paramAsBoolean(INCLUDE_METADATA_PARAM, false);
         boolean ccsMinimizeRoundTrips = resolveCcsMinimizeRoundTrips(request);
-        boolean streaming = resolveStreamingParam(request);
+        boolean inplaceAggregation = resolveInplaceAggregationParam(request);
 
         // Extract resolved partitions from request body (implements FederationMetadata)
         FederationMetadata federationMetadata = (requestBody != null) ? requestBody.resolvedPartitions() : null;
@@ -488,7 +488,7 @@ public class RestM3QLAction extends BaseTSDBAction {
                 includeMetadata,
                 federationMetadata,
                 ccsMinimizeRoundTrips,
-                streaming
+                inplaceAggregation
             );
             listener.onResponse(params);
         } else {
@@ -508,7 +508,7 @@ public class RestM3QLAction extends BaseTSDBAction {
                         includeMetadata,
                         federationMetadata,
                         ccsMinimizeRoundTrips,
-                        streaming
+                        inplaceAggregation
                     );
                     listener.onResponse(params);
                 }
@@ -593,7 +593,7 @@ public class RestM3QLAction extends BaseTSDBAction {
             params.pushdown,
             params.profile,
             params.federationMetadata,
-            params.streaming
+            params.inplaceAggregation
         );
         return M3OSTranslator.translate(params.query, translatorParams);
     }
@@ -809,7 +809,8 @@ public class RestM3QLAction extends BaseTSDBAction {
      * Internal record holding parsed request parameters.
      */
     protected record RequestParams(String query, long startMs, long endMs, long stepMs, String[] indices, boolean explain, boolean pushdown,
-        boolean profile, boolean includeMetadata, FederationMetadata federationMetadata, boolean ccsMinimizeRoundTrips, boolean streaming) {
+        boolean profile, boolean includeMetadata, FederationMetadata federationMetadata, boolean ccsMinimizeRoundTrips,
+        boolean inplaceAggregation) {
 
     }
 

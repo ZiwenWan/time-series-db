@@ -44,7 +44,7 @@ public abstract class BaseTSDBAction extends BaseRestHandler {
     protected static final String CCS_MINIMIZE_ROUNDTRIPS_PARAM = "ccs_minimize_roundtrips";
     protected static final String PROFILE_PARAM = "profile";
     protected static final String INCLUDE_METADATA_PARAM = "include_metadata";
-    protected static final String STREAMING_PARAM = "streaming";
+    protected static final String INPLACE_AGGREGATION_PARAM = "inplace_aggregation";
 
     // Date format pattern
     protected static final String DATE_FORMAT_PATTERN = FormatNames.STRICT_DATE_OPTIONAL_TIME.getSnakeCaseName()
@@ -64,10 +64,10 @@ public abstract class BaseTSDBAction extends BaseRestHandler {
     private volatile boolean forceNoPushdown;
 
     /**
-     * Volatile flag to track cluster-wide streaming aggregation default.
-     * When true, streaming aggregation is enabled by default unless overridden per-query.
+     * Volatile flag to track cluster-wide inplace aggregation default.
+     * When true, inplace aggregation is enabled by default unless overridden per-query.
      */
-    private volatile boolean streamingAggregationEnabled;
+    private volatile boolean inplaceAggregationEnabled;
 
     private volatile boolean ccsMinimizeRoundTrips;
 
@@ -86,13 +86,13 @@ public abstract class BaseTSDBAction extends BaseRestHandler {
             logger.info("Updated force_no_pushdown setting to: {}", newValue);
         });
 
-        // Initialize streaming aggregation flag from current settings
-        this.streamingAggregationEnabled = clusterSettings.get(TSDBPlugin.TSDB_ENGINE_STREAMING_AGGREGATION_ENABLED);
+        // Initialize inplace aggregation flag from current settings
+        this.inplaceAggregationEnabled = clusterSettings.get(TSDBPlugin.TSDB_ENGINE_INPLACE_AGGREGATION_ENABLED);
 
-        // Register listener to update streaming aggregation flag when setting changes
-        clusterSettings.addSettingsUpdateConsumer(TSDBPlugin.TSDB_ENGINE_STREAMING_AGGREGATION_ENABLED, newValue -> {
-            this.streamingAggregationEnabled = newValue;
-            logger.info("Updated streaming_aggregation_enabled setting to: {}", newValue);
+        // Register listener to update inplace aggregation flag when setting changes
+        clusterSettings.addSettingsUpdateConsumer(TSDBPlugin.TSDB_ENGINE_INPLACE_AGGREGATION_ENABLED, newValue -> {
+            this.inplaceAggregationEnabled = newValue;
+            logger.info("Updated inplace_aggregation_enabled setting to: {}", newValue);
         });
 
         this.ccsMinimizeRoundTrips = clusterSettings.get(TSDBPlugin.TSDB_ENGINE_CCS_MINIMIZE_ROUNDTRIPS);
@@ -126,13 +126,13 @@ public abstract class BaseTSDBAction extends BaseRestHandler {
     }
 
     /**
-     * Resolves the streaming parameter, using the cluster setting as default.
+     * Resolves the inplace aggregation parameter, using the cluster setting as default.
      *
      * @param request the REST request
-     * @return resolved streaming value (per-query param overrides cluster default)
+     * @return resolved inplace aggregation value (per-query param overrides cluster default)
      */
-    protected boolean resolveStreamingParam(RestRequest request) {
-        return request.paramAsBoolean(STREAMING_PARAM, streamingAggregationEnabled);
+    protected boolean resolveInplaceAggregationParam(RestRequest request) {
+        return request.paramAsBoolean(INPLACE_AGGREGATION_PARAM, inplaceAggregationEnabled);
     }
 
     /**
