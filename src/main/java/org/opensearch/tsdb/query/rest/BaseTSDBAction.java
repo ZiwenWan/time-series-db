@@ -44,6 +44,7 @@ public abstract class BaseTSDBAction extends BaseRestHandler {
     protected static final String CCS_MINIMIZE_ROUNDTRIPS_PARAM = "ccs_minimize_roundtrips";
     protected static final String PROFILE_PARAM = "profile";
     protected static final String INCLUDE_METADATA_PARAM = "include_metadata";
+    protected static final String STREAMING_PARAM = "streaming";
 
     // Date format pattern
     protected static final String DATE_FORMAT_PATTERN = FormatNames.STRICT_DATE_OPTIONAL_TIME.getSnakeCaseName()
@@ -62,6 +63,12 @@ public abstract class BaseTSDBAction extends BaseRestHandler {
      */
     private volatile boolean forceNoPushdown;
 
+    /**
+     * Volatile flag to track cluster-wide streaming aggregation default.
+     * When true, streaming aggregation is enabled by default unless overridden per-query.
+     */
+    private volatile boolean streamingAggregationEnabled;
+
     private volatile boolean ccsMinimizeRoundTrips;
 
     /**
@@ -77,6 +84,15 @@ public abstract class BaseTSDBAction extends BaseRestHandler {
         clusterSettings.addSettingsUpdateConsumer(TSDBPlugin.TSDB_ENGINE_FORCE_NO_PUSHDOWN, newValue -> {
             this.forceNoPushdown = newValue;
             logger.info("Updated force_no_pushdown setting to: {}", newValue);
+        });
+
+        // Initialize streaming aggregation flag from current settings
+        this.streamingAggregationEnabled = clusterSettings.get(TSDBPlugin.TSDB_ENGINE_STREAMING_AGGREGATION_ENABLED);
+
+        // Register listener to update streaming aggregation flag when setting changes
+        clusterSettings.addSettingsUpdateConsumer(TSDBPlugin.TSDB_ENGINE_STREAMING_AGGREGATION_ENABLED, newValue -> {
+            this.streamingAggregationEnabled = newValue;
+            logger.info("Updated streaming_aggregation_enabled setting to: {}", newValue);
         });
 
         this.ccsMinimizeRoundTrips = clusterSettings.get(TSDBPlugin.TSDB_ENGINE_CCS_MINIMIZE_ROUNDTRIPS);
@@ -107,6 +123,16 @@ public abstract class BaseTSDBAction extends BaseRestHandler {
 
     protected boolean resolveCcsMinimizeRoundTrips(RestRequest request) {
         return request.paramAsBoolean(CCS_MINIMIZE_ROUNDTRIPS_PARAM, ccsMinimizeRoundTrips);
+    }
+
+    /**
+     * Resolves the streaming parameter, using the cluster setting as default.
+     *
+     * @param request the REST request
+     * @return resolved streaming value (per-query param overrides cluster default)
+     */
+    protected boolean resolveStreamingParam(RestRequest request) {
+        return request.paramAsBoolean(STREAMING_PARAM, streamingAggregationEnabled);
     }
 
     /**

@@ -524,6 +524,18 @@ public class TSDBPlugin extends Plugin implements SearchPlugin, EnginePlugin, Ac
     );
 
     /**
+     * Setting to enable streaming aggregation as the default for all queries.
+     * When enabled, queries will use streaming aggregation unless explicitly overridden
+     * by the per-query 'streaming' REST parameter.
+     */
+    public static final Setting<Boolean> TSDB_ENGINE_STREAMING_AGGREGATION_ENABLED = Setting.boolSetting(
+        "tsdb_engine.query.streaming_aggregation_enabled",
+        false,  // default: false (streaming disabled)
+        Setting.Property.NodeScope,
+        Setting.Property.Dynamic
+    );
+
+    /**
      * Setting to enable sending compressed time series data chunks to the coordinator node
      * When enabled, data nodes will send the compressed time series data chunks to the coordinator node, reducing network costs.
      */
@@ -749,6 +761,7 @@ public class TSDBPlugin extends Plugin implements SearchPlugin, EnginePlugin, Ac
             TSDB_ENGINE_WILDCARD_QUERY_CACHE_MAX_SIZE,
             TSDB_ENGINE_WILDCARD_QUERY_CACHE_EXPIRE_AFTER,
             TSDB_ENGINE_FORCE_NO_PUSHDOWN,
+            TSDB_ENGINE_STREAMING_AGGREGATION_ENABLED,
             TSDB_ENGINE_ENABLE_INTERNAL_AGG_CHUNK_COMPRESSION,
             TSDB_ENGINE_CCS_MINIMIZE_ROUNDTRIPS,
             TSDB_ENGINE_DEFAULT_STEP,

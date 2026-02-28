@@ -119,6 +119,10 @@ public class TSDBPluginTests extends OpenSearchTestCase {
         );
         assertTrue("Should contain TSDB_ENGINE_FORCE_NO_PUSHDOWN setting", settings.contains(TSDBPlugin.TSDB_ENGINE_FORCE_NO_PUSHDOWN));
         assertTrue(
+            "Should contain TSDB_ENGINE_STREAMING_AGGREGATION_ENABLED setting",
+            settings.contains(TSDBPlugin.TSDB_ENGINE_STREAMING_AGGREGATION_ENABLED)
+        );
+        assertTrue(
             "Should contain TSDB_ENGINE_ENABLE_INTERNAL_AGG_CHUNK_COMPRESSION setting",
             settings.contains(TSDBPlugin.TSDB_ENGINE_ENABLE_INTERNAL_AGG_CHUNK_COMPRESSION)
         );
