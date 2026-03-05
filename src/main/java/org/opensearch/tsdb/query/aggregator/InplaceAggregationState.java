@@ -204,7 +204,15 @@ class NoTagInplaceAggregationState implements InplaceAggregationState {
         }
 
         // Create single TimeSeries with empty labels (global aggregation)
-        TimeSeries timeSeries = new TimeSeries(sampleList, ByteLabels.emptyLabels(), this.minTimestamp, this.maxTimestamp, this.step, null);
+        long alignedMaxTimestamp = TimeSeries.calculateAlignedMaxTimestamp(this.minTimestamp, this.maxTimestamp, this.step);
+        TimeSeries timeSeries = new TimeSeries(
+            sampleList,
+            ByteLabels.emptyLabels(),
+            this.minTimestamp,
+            alignedMaxTimestamp,
+            this.step,
+            null
+        );
 
         return Collections.singletonList(timeSeries);
     }
@@ -332,11 +340,12 @@ class TagInplaceAggregationState implements InplaceAggregationState {
 
             SampleList sampleList = arrays.createSampleList(minTimestamp, step);
             if (!sampleList.isEmpty()) {
+                long alignedMaxTimestamp = TimeSeries.calculateAlignedMaxTimestamp(this.minTimestamp, this.maxTimestamp, this.step);
                 TimeSeries timeSeries = new TimeSeries(
                     sampleList,
                     groupLabels,
                     this.minTimestamp,
-                    this.maxTimestamp,
+                    alignedMaxTimestamp,
                     this.step,
                     null // No alias for inplace aggregation
                 );
