@@ -27,6 +27,11 @@ import java.util.Objects;
 /**
  * Aggregation builder for time series inplace aggregations.
  *
+ * <p><strong>EXPERIMENTAL:</strong> This feature is experimental and does not guarantee correctness
+ * when there is duplicated data across segments. Any duplication across live indices and
+ * closed-chunk indices (or any segments in general) will lead to double-counting in aggregation
+ * results. Use with caution and only on datasets known to have no cross-segment duplicates.</p>
+ *
  * <p>This builder creates {@link TimeSeriesInplaceAggregator} instances that process
  * "fetch | aggregation" queries in an inplace fashion without reconstructing full
  * time series in memory. It supports sum, min, max, and avg aggregations with

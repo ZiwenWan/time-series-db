@@ -43,6 +43,11 @@ import java.util.Map;
 /**
  * Inplace aggregator that processes "fetch | aggregation" queries without reconstructing full time series.
  *
+ * <p><strong>EXPERIMENTAL:</strong> This feature is experimental and does not guarantee correctness
+ * when there is duplicated data across segments. Any duplication across live indices and
+ * closed-chunk indices (or any segments in general) will lead to double-counting in aggregation
+ * results. Use with caution and only on datasets known to have no cross-segment duplicates.</p>
+ *
  * <p>This aggregator optimizes simple fetch + aggregation queries by processing data in an inplace
  * fashion, avoiding the memory overhead of creating intermediate TimeSeries objects. It supports
  * sum, min, max, and avg aggregations with optional label-based grouping.</p>
