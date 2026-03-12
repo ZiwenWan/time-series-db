@@ -31,8 +31,6 @@ import java.util.SortedSet;
 import java.util.TreeMap;
 import java.util.TreeSet;
 
-import static org.opensearch.tsdb.metrics.TSDBMetricsConstants.NANOS_PER_MILLI;
-
 /**
  * HistogramPercentileStage is a UnaryPipelineStage stage that calculates percentiles from histogram buckets.
  * This stage groups time series by all labels except bucketId and bucket range,
