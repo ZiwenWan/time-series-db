@@ -77,28 +77,84 @@ public class TimeSeriesInplaceAggregationBenchmark extends BaseTSDBBenchmark {
     // All label values are selected from fixed pools
     private static final String[] REGIONS = { "dca", "phx" };
     private static final String[] ZONES = {
-        "dca01", "dca02", "dca03", "dca04", "dca05", "dca06", "dca07", "dca08", "dca09", "dca10",
-        "phx01", "phx02", "phx03", "phx04", "phx05", "phx06", "phx07", "phx08", "phx09", "phx10" };
+        "dca01",
+        "dca02",
+        "dca03",
+        "dca04",
+        "dca05",
+        "dca06",
+        "dca07",
+        "dca08",
+        "dca09",
+        "dca10",
+        "phx01",
+        "phx02",
+        "phx03",
+        "phx04",
+        "phx05",
+        "phx06",
+        "phx07",
+        "phx08",
+        "phx09",
+        "phx10" };
     private static final String[] SERVICES = {
-        "api-gateway", "user-service", "order-service", "payment-service", "notification-service", "auth-service" };
+        "api-gateway",
+        "user-service",
+        "order-service",
+        "payment-service",
+        "notification-service",
+        "auth-service" };
     private static final String[] HOSTS = {
-        "dca-web001", "dca-web002", "dca-web003", "dca-web004", "dca-web005",
-        "dca-app001", "dca-app002", "dca-app003", "dca-app004", "dca-app005",
-        "phx-web001", "phx-web002", "phx-web003", "phx-web004", "phx-web005",
-        "phx-app001", "phx-app002", "phx-app003", "phx-app004", "phx-app005" };
+        "dca-web001",
+        "dca-web002",
+        "dca-web003",
+        "dca-web004",
+        "dca-web005",
+        "dca-app001",
+        "dca-app002",
+        "dca-app003",
+        "dca-app004",
+        "dca-app005",
+        "phx-web001",
+        "phx-web002",
+        "phx-web003",
+        "phx-web004",
+        "phx-web005",
+        "phx-app001",
+        "phx-app002",
+        "phx-app003",
+        "phx-app004",
+        "phx-app005" };
     private static final String[] CLUSTERS = { "primary", "secondary", "canary" };
     private static final String[] ENVS = { "production", "staging" };
     private static final String[] TEAMS = { "platform", "commerce", "identity", "infra" };
     private static final String[] VERSIONS = { "v1.2.3", "v1.2.4", "v1.3.0", "v2.0.0" };
     private static final String[] INSTANCES = {
-        "dca-web001:8080", "dca-web002:8080", "dca-app001:8081", "dca-app002:8081",
-        "phx-web001:8080", "phx-web002:8080", "phx-app001:8081", "phx-app002:8081",
-        "dca-web003:8080", "dca-web004:8080", "phx-web003:8080", "phx-web004:8080" };
+        "dca-web001:8080",
+        "dca-web002:8080",
+        "dca-app001:8081",
+        "dca-app002:8081",
+        "phx-web001:8080",
+        "phx-web002:8080",
+        "phx-app001:8081",
+        "phx-app002:8081",
+        "dca-web003:8080",
+        "dca-web004:8080",
+        "phx-web003:8080",
+        "phx-web004:8080" };
     private static final String[] PODS = {
-        "api-gateway-6f8b9c-x4k2p", "api-gateway-6f8b9c-m9j3q", "user-service-a3d1e7-r7h5n",
-        "user-service-a3d1e7-w2k8m", "order-service-b7c4f2-p3j6t", "order-service-b7c4f2-q8n1v",
-        "payment-service-d9e5a1-s5m2x", "payment-service-d9e5a1-k4h7r", "notification-service-c2f8d3-y6p9w",
-        "auth-service-e4g6b8-t1n3z", "auth-service-e4g6b8-u7j5q", "notification-service-c2f8d3-v8m4k" };
+        "api-gateway-6f8b9c-x4k2p",
+        "api-gateway-6f8b9c-m9j3q",
+        "user-service-a3d1e7-r7h5n",
+        "user-service-a3d1e7-w2k8m",
+        "order-service-b7c4f2-p3j6t",
+        "order-service-b7c4f2-q8n1v",
+        "payment-service-d9e5a1-s5m2x",
+        "payment-service-d9e5a1-k4h7r",
+        "notification-service-c2f8d3-y6p9w",
+        "auth-service-e4g6b8-t1n3z",
+        "auth-service-e4g6b8-u7j5q",
+        "notification-service-c2f8d3-v8m4k" };
     private static final String[] NAMESPACES = { "default", "kube-system", "monitoring", "apps" };
 
     private static final List<String> GROUP_BY_TAGS = List.of("zone", "service");

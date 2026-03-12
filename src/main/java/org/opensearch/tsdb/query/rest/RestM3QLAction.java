@@ -495,7 +495,7 @@ public class RestM3QLAction extends BaseTSDBAction {
                 includeMetadata,
                 federationMetadata,
                 ccsMinimizeRoundTrips,
-                inplaceAggregation
+                inplaceAggregation,
                 includeExecStats,
                 includeDataSource
             );
@@ -517,7 +517,7 @@ public class RestM3QLAction extends BaseTSDBAction {
                         includeMetadata,
                         federationMetadata,
                         ccsMinimizeRoundTrips,
-                        inplaceAggregation
+                        inplaceAggregation,
                         includeExecStats,
                         includeDataSource
                     );
@@ -821,8 +821,7 @@ public class RestM3QLAction extends BaseTSDBAction {
      */
     protected record RequestParams(String query, long startMs, long endMs, long stepMs, String[] indices, boolean explain, boolean pushdown,
         boolean profile, boolean includeMetadata, FederationMetadata federationMetadata, boolean ccsMinimizeRoundTrips,
-        boolean inplaceAggregation) {
-        boolean includeExecStats, boolean includeDataSource) {
+        boolean inplaceAggregation, boolean includeExecStats, boolean includeDataSource) {
 
     }
 

@@ -93,7 +93,7 @@ public abstract class BaseQueryExecutor {
                 QueryConfig inplaceQuery = query.withInplaceAggregation(true);
                 try {
                     PromMatrixResponse inplaceResponse = executeQuery(inplaceQuery, inplaceQuery.indices());
-                    validateResponse(inplaceQuery, inplaceResponse);
+                    validateResponse(testCase, inplaceQuery, inplaceResponse);
                 } catch (Exception e) {
                     throw new AssertionError(
                         inplaceQuery.name() + ": inplace_aggregation variant failed but non-inplace_aggregation succeeded",
