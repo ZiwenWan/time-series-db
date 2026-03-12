@@ -283,7 +283,17 @@ public class TimeSeriesCoordinatorAggregator extends SiblingPipelineAggregator {
                 cbConsumer.accept(resultBytes);
             }
 
-            return new InternalTimeSeries(name(), result, metadata());
+            // Propagate merged execStats and dataSource from referenced input aggregations
+            AggregationExecStats mergedStats = AggregationExecStats.EMPTY;
+            AggregationDataSource mergedDataSource = AggregationDataSource.EMPTY;
+            for (Aggregation agg : aggregations) {
+                if (agg instanceof InternalTimeSeries its) {
+                    mergedStats = mergedStats.merge(its.getExecStats());
+                    mergedDataSource = mergedDataSource.merge(its.getDataSource());
+                }
+            }
+
+            return new InternalTimeSeries(name(), result, metadata(), null, mergedStats, mergedDataSource);
         }
     }
 

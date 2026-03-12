@@ -15,6 +15,8 @@ import org.opensearch.tsdb.lang.m3.m3ql.parser.nodes.M3ASTNode;
 import org.opensearch.tsdb.lang.m3.m3ql.parser.nodes.PipelineNode;
 import org.opensearch.tsdb.lang.m3.m3ql.parser.nodes.RootNode;
 import org.opensearch.tsdb.lang.m3.m3ql.parser.nodes.ValueNode;
+import org.opensearch.tsdb.lang.m3.m3ql.plan.expand.BurnRatePipelineExpander;
+import org.opensearch.tsdb.lang.m3.m3ql.plan.expand.PipelineExpander;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.AsPercentPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.BinaryPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.DiffPlanNode;
@@ -36,6 +38,14 @@ import static org.opensearch.common.Booleans.parseBooleanStrict;
  * M3ASTConverter is responsible for converting the M3QL AST into a plan.
  */
 public class M3ASTConverter {
+
+    private static final Set<String> PIPELINE_EXPAND_FUNCTIONS = Set.of(
+        Constants.Functions.Binary.BURN_RATE,
+        Constants.Functions.Binary.AS_BURN_RATE,
+        Constants.Functions.Binary.MULTI_BURN_RATE,
+        Constants.Functions.Binary.AS_MULTI_BURN_RATE
+    );
+
     private static final Set<String> FUNCTIONS_WITH_PIPELINE_ARG = Set.of(
         Constants.Functions.Binary.AS_PERCENT,
         Constants.Functions.Binary.RATIO,
@@ -114,6 +124,11 @@ public class M3ASTConverter {
                 resultPlanNode = finalizePlanNode(resultPlanNode, danglingPlanNode);
                 danglingPlanNode = null;
                 resultPlanNode = handleFallbackSeriesWithPipelineArg(resultPlanNode, (FunctionNode) childNode);
+            } else if (isPipelineExpandFunction(childNode)) {
+                assert resultPlanNode != null : "resultPlanNode should not be null when handling pipeline expand function";
+                resultPlanNode = finalizePlanNode(resultPlanNode, danglingPlanNode);
+                danglingPlanNode = null;
+                resultPlanNode = handleExpandedPipeline(node.getChildren(), childIndex, (FunctionNode) childNode);
             } else if (isFunctionNodeWithPipelineArg(childNode)) {
                 assert resultPlanNode != null : "resultPlanNode should not be null when handling function with pipeline arg";
                 resultPlanNode = finalizePlanNode(resultPlanNode, danglingPlanNode);
@@ -134,7 +149,7 @@ public class M3ASTConverter {
             }
         }
 
-        // Finalize the sub-plan, removing leftover boundary markers and
+        // Finalize the sub-plan, removing leftover boundary markers
         if (outsideBoundaryMarker) {
             M3PlanNode subPlan = M3PlanFinalizer.finalize(finalizePlanNode(resultPlanNode, danglingPlanNode));
             ChainBoundaryMarker boundaryMarker = new ChainBoundaryMarker();
@@ -142,6 +157,15 @@ public class M3ASTConverter {
             return boundaryMarker;
         }
         return finalizePlanNode(resultPlanNode, danglingPlanNode);
+    }
+
+    /**
+     * Converts a list of AST children into a plan by wrapping them in a synthetic PipelineNode.
+     */
+    private M3PlanNode handlePipelineChildren(List<M3ASTNode> children) {
+        PipelineNode syntheticPipeline = new PipelineNode();
+        syntheticPipeline.getChildren().addAll(children);
+        return handlePipelineOrGroupNode(syntheticPipeline);
     }
 
     // Finalizes the plan node by returning the dangling node if it exists, otherwise the result node.
@@ -258,6 +282,19 @@ public class M3ASTConverter {
         return binaryPlanNode;
     }
 
+    private boolean isPipelineExpandFunction(M3ASTNode node) {
+        return node instanceof FunctionNode fn && PIPELINE_EXPAND_FUNCTIONS.contains(fn.getFunctionName());
+    }
+
+    private M3PlanNode handleExpandedPipeline(List<M3ASTNode> children, int lhsEndIndex, FunctionNode functionNode) {
+        PipelineExpander expander = switch (functionNode.getFunctionName()) {
+            case Constants.Functions.Binary.BURN_RATE, Constants.Functions.Binary.AS_BURN_RATE, Constants.Functions.Binary.MULTI_BURN_RATE,
+                Constants.Functions.Binary.AS_MULTI_BURN_RATE -> new BurnRatePipelineExpander();
+            default -> throw new IllegalArgumentException("No pipeline expander for: " + functionNode.getFunctionName());
+        };
+        return expander.expand(children, lhsEndIndex, functionNode, this::handlePipelineOrGroupNode, this::handlePipelineChildren);
+    }
+
     // True if M3ASTNode is a function node that takes a pipeline as an argument
     private boolean isFunctionNodeWithPipelineArg(M3ASTNode node) {
         return node instanceof FunctionNode functionNode && functionNodeHasPipelineArg(functionNode);
@@ -277,6 +314,7 @@ public class M3ASTConverter {
             );
         }
         M3PlanNode rhs = handlePipelineOrGroupNode(child);
+
         BinaryPlanNode binaryPlanNode = createBinaryPlanNode(functionNode);
 
         binaryPlanNode.addChild(lhs);
@@ -354,6 +392,7 @@ public class M3ASTConverter {
         }
 
         M3PlanNode planNode = M3PlanNodeFactory.create(functionNode);
+
         if (danglingPlanNode == null) {
             planNode.addChild(resultPlanNode);
         } else {

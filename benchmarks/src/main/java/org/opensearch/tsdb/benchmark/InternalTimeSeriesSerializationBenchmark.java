@@ -96,14 +96,14 @@ public class InternalTimeSeriesSerializationBenchmark {
                 seriesList.add(ts);
             }
             internalTimeSeries[s] = new InternalTimeSeries("test-" + s, seriesList, Map.of());
-            InternalTimeSeries.serialFormatSetting = InternalTimeSeries.CURRENT_SERIAL_VERSION;
+            InternalTimeSeries.serialFormatSetting = InternalTimeSeries.VERSION_1;
             BytesStreamOutput out = new BytesStreamOutput();
             internalTimeSeries[s].writeTo(out);
             serializedTimeSeries[s] = BytesReference.toBytes(out.bytes());
             // System.out.println(RamUsageEstimator.sizeOf(serializedTimeSeries[s]));
 
             out = new BytesStreamOutput();
-            InternalTimeSeries.serialFormatSetting = InternalTimeSeries.LEGACY_SERIAL_VERSION;
+            InternalTimeSeries.serialFormatSetting = InternalTimeSeries.VERSION_0;
             internalTimeSeries[s].writeTo(out);
             legacySerializedTimeSeries[s] = BytesReference.toBytes(out.bytes());
             // System.out.println(RamUsageEstimator.sizeOf(legacySerializedTimeSeries[s]));
@@ -112,7 +112,7 @@ public class InternalTimeSeriesSerializationBenchmark {
 
     @Benchmark
     public void serialBench(Blackhole bh) throws IOException {
-        InternalTimeSeries.serialFormatSetting = InternalTimeSeries.CURRENT_SERIAL_VERSION;
+        InternalTimeSeries.serialFormatSetting = InternalTimeSeries.VERSION_1;
         for (int s = 0; s < numShards; s++) {
             BytesStreamOutput out = new BytesStreamOutput();
             internalTimeSeries[s].writeTo(out);
@@ -128,7 +128,7 @@ public class InternalTimeSeriesSerializationBenchmark {
 
     @Benchmark
     public void oldSerialBench(Blackhole bh) throws IOException {
-        InternalTimeSeries.serialFormatSetting = InternalTimeSeries.LEGACY_SERIAL_VERSION;
+        InternalTimeSeries.serialFormatSetting = InternalTimeSeries.VERSION_0;
         for (int s = 0; s < numShards; s++) {
             BytesStreamOutput out = new BytesStreamOutput();
             internalTimeSeries[s].writeTo(out);

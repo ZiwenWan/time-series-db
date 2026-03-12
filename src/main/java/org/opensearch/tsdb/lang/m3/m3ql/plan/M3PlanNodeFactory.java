@@ -146,6 +146,8 @@ public class M3PlanNodeFactory {
                 return SummarizePlanNode.of(functionNode);
             case Constants.Functions.SCALE:
                 return ScalePlanNode.of(functionNode);
+            case Constants.Functions.BURN_RATE_MULTIPLIER:
+                return ScalePlanNode.ofBurnRateMultiplier(functionNode);
             case Constants.Functions.SCALE_TO_SECONDS:
                 return ScaleToSecondsPlanNode.of(functionNode);
             case Constants.Functions.DIVIDE_SCALAR:
@@ -197,4 +199,5 @@ public class M3PlanNodeFactory {
                 }
         }
     }
+
 }

@@ -467,7 +467,14 @@ public class TimeSeriesUnfoldAggregator extends BucketsAggregator {
     @Override
     public InternalAggregation buildEmptyAggregation() {
         Map<String, Object> emptyMetadata = metadata();
-        return new InternalTimeSeries(name, List.of(), emptyMetadata != null ? emptyMetadata : Map.of());
+        return new InternalTimeSeries(
+            name,
+            List.of(),
+            emptyMetadata != null ? emptyMetadata : Map.of(),
+            null,
+            AggregationExecStats.EMPTY,
+            AggregationDataSource.EMPTY
+        );
     }
 
     @Override
@@ -501,13 +508,22 @@ public class TimeSeriesUnfoldAggregator extends BucketsAggregator {
                     reduceStage = lastStage;
                 }
 
+                // Capture exec stats snapshot for this shard result.
+                // Stats are always collected (negligible counter overhead).
+                AggregationExecStats execStats = executionStats.toAggregationExecStats();
+
+                // TODO: populate from actual index metadata
+                AggregationDataSource dataSource = AggregationDataSource.EMPTY;
+
                 // Use the generic InternalPipeline with the reduce stage
                 Map<String, Object> baseMetadata = metadata();
                 results[i] = new InternalTimeSeries(
                     name,
                     timeSeriesList,
                     baseMetadata != null ? baseMetadata : Map.of(),
-                    reduceStage  // Pass the reduce stage (null for transformation stages)
+                    reduceStage,  // Pass the reduce stage (null for transformation stages)
+                    execStats,
+                    dataSource
                 );
             }
             return results;
@@ -706,9 +722,27 @@ public class TimeSeriesUnfoldAggregator extends BucketsAggregator {
         }
 
         /**
+         * Converts the current execution stats into an immutable {@link AggregationExecStats} snapshot.
+         * Called in {@link TimeSeriesUnfoldAggregator#buildAggregations(long[])} to capture shard-level stats
+         * for transport to the coordinator.
+         *
+         * @return an immutable snapshot of the current execution stats
+         */
+        AggregationExecStats toAggregationExecStats() {
+            return new AggregationExecStats(
+                inputSeriesCount,
+                totalSamplesPostFilter,
+                closedChunkCount,
+                liveChunkCount,
+                closedDocCount,
+                liveDocCount,
+                maxCircuitBreakerBytes
+            );
+        }
+
+        /**
          * Add debug info to profiler output.
          * Uses maxCircuitBreakerBytes (kept up to date by aggregator when circuit breaker changes).
-         * TODO Execution Stats will be exposed with another param
          */
         void add(BiConsumer<String, Object> add) {
             add.accept(ProfileInfoMapper.TOTAL_DOCS, totalDocCount);

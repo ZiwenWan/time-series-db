@@ -44,7 +44,10 @@ public abstract class BaseTSDBAction extends BaseRestHandler {
     protected static final String CCS_MINIMIZE_ROUNDTRIPS_PARAM = "ccs_minimize_roundtrips";
     protected static final String PROFILE_PARAM = "profile";
     protected static final String INCLUDE_METADATA_PARAM = "include_metadata";
+    protected static final String INCLUDE_EXEC_STATS_PARAM = "include_exec_stats";
+    protected static final String INCLUDE_DATA_SOURCE_PARAM = "include_data_source";
     protected static final String INPLACE_AGGREGATION_PARAM = "inplace_aggregation";
+
 
     // Date format pattern
     protected static final String DATE_FORMAT_PATTERN = FormatNames.STRICT_DATE_OPTIONAL_TIME.getSnakeCaseName()
