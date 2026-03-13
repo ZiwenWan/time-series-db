@@ -46,6 +46,7 @@ public abstract class BaseTSDBAction extends BaseRestHandler {
     protected static final String INCLUDE_METADATA_PARAM = "include_metadata";
     protected static final String INCLUDE_EXEC_STATS_PARAM = "include_exec_stats";
     protected static final String INCLUDE_DATA_SOURCE_PARAM = "include_data_source";
+    protected static final String INPLACE_AGGREGATION_PARAM = "inplace_aggregation";
 
     // Date format pattern
     protected static final String DATE_FORMAT_PATTERN = FormatNames.STRICT_DATE_OPTIONAL_TIME.getSnakeCaseName()
@@ -64,6 +65,12 @@ public abstract class BaseTSDBAction extends BaseRestHandler {
      */
     private volatile boolean forceNoPushdown;
 
+    /**
+     * Volatile flag to track cluster-wide inplace aggregation default.
+     * When true, inplace aggregation is enabled by default unless overridden per-query.
+     */
+    private volatile boolean inplaceAggregationEnabled;
+
     private volatile boolean ccsMinimizeRoundTrips;
 
     /**
@@ -79,6 +86,15 @@ public abstract class BaseTSDBAction extends BaseRestHandler {
         clusterSettings.addSettingsUpdateConsumer(TSDBPlugin.TSDB_ENGINE_FORCE_NO_PUSHDOWN, newValue -> {
             this.forceNoPushdown = newValue;
             logger.info("Updated force_no_pushdown setting to: {}", newValue);
+        });
+
+        // Initialize inplace aggregation flag from current settings
+        this.inplaceAggregationEnabled = clusterSettings.get(TSDBPlugin.TSDB_ENGINE_INPLACE_AGGREGATION_ENABLED);
+
+        // Register listener to update inplace aggregation flag when setting changes
+        clusterSettings.addSettingsUpdateConsumer(TSDBPlugin.TSDB_ENGINE_INPLACE_AGGREGATION_ENABLED, newValue -> {
+            this.inplaceAggregationEnabled = newValue;
+            logger.info("Updated inplace_aggregation_enabled setting to: {}", newValue);
         });
 
         this.ccsMinimizeRoundTrips = clusterSettings.get(TSDBPlugin.TSDB_ENGINE_CCS_MINIMIZE_ROUNDTRIPS);
@@ -109,6 +125,16 @@ public abstract class BaseTSDBAction extends BaseRestHandler {
 
     protected boolean resolveCcsMinimizeRoundTrips(RestRequest request) {
         return request.paramAsBoolean(CCS_MINIMIZE_ROUNDTRIPS_PARAM, ccsMinimizeRoundTrips);
+    }
+
+    /**
+     * Resolves the inplace aggregation parameter, using the cluster setting as default.
+     *
+     * @param request the REST request
+     * @return resolved inplace aggregation value (per-query param overrides cluster default)
+     */
+    protected boolean resolveInplaceAggregationParam(RestRequest request) {
+        return request.paramAsBoolean(INPLACE_AGGREGATION_PARAM, inplaceAggregationEnabled);
     }
 
     /**

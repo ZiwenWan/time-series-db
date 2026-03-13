@@ -205,6 +205,7 @@ public class RestM3QLAction extends BaseTSDBAction {
         boolean ccsMinimizeRoundTrips = resolveCcsMinimizeRoundTrips(request);
         final boolean profileParam = request.paramAsBoolean(PROFILE_PARAM, false);
         final boolean includeMetadataParam = request.paramAsBoolean(INCLUDE_METADATA_PARAM, false);
+        final boolean inplaceAggregationParam = resolveInplaceAggregationParam(request);
         final boolean includeExecStatsParam = request.paramAsBoolean(INCLUDE_EXEC_STATS_PARAM, false);
         final boolean includeDataSourceParam = request.paramAsBoolean(INCLUDE_DATA_SOURCE_PARAM, false);
 
@@ -473,6 +474,7 @@ public class RestM3QLAction extends BaseTSDBAction {
         boolean includeExecStats = request.paramAsBoolean(INCLUDE_EXEC_STATS_PARAM, false);
         boolean includeDataSource = request.paramAsBoolean(INCLUDE_DATA_SOURCE_PARAM, false);
         boolean ccsMinimizeRoundTrips = resolveCcsMinimizeRoundTrips(request);
+        boolean inplaceAggregation = resolveInplaceAggregationParam(request);
 
         // Extract resolved partitions from request body (implements FederationMetadata)
         FederationMetadata federationMetadata = (requestBody != null) ? requestBody.resolvedPartitions() : null;
@@ -493,6 +495,7 @@ public class RestM3QLAction extends BaseTSDBAction {
                 includeMetadata,
                 federationMetadata,
                 ccsMinimizeRoundTrips,
+                inplaceAggregation,
                 includeExecStats,
                 includeDataSource
             );
@@ -514,6 +517,7 @@ public class RestM3QLAction extends BaseTSDBAction {
                         includeMetadata,
                         federationMetadata,
                         ccsMinimizeRoundTrips,
+                        inplaceAggregation,
                         includeExecStats,
                         includeDataSource
                     );
@@ -599,7 +603,8 @@ public class RestM3QLAction extends BaseTSDBAction {
             params.stepMs,
             params.pushdown,
             params.profile,
-            params.federationMetadata
+            params.federationMetadata,
+            params.inplaceAggregation
         );
         return M3OSTranslator.translate(params.query, translatorParams);
     }
@@ -816,7 +821,7 @@ public class RestM3QLAction extends BaseTSDBAction {
      */
     protected record RequestParams(String query, long startMs, long endMs, long stepMs, String[] indices, boolean explain, boolean pushdown,
         boolean profile, boolean includeMetadata, FederationMetadata federationMetadata, boolean ccsMinimizeRoundTrips,
-        boolean includeExecStats, boolean includeDataSource) {
+        boolean inplaceAggregation, boolean includeExecStats, boolean includeDataSource) {
 
     }
 

@@ -67,6 +67,7 @@ import org.opensearch.tsdb.query.search.TimeRangePruningQueryBuilder;
 import org.opensearch.tsdb.query.aggregator.InternalTimeSeries;
 import org.opensearch.tsdb.query.aggregator.InternalTSDBStats;
 import org.opensearch.tsdb.query.aggregator.TimeSeriesCoordinatorAggregationBuilder;
+import org.opensearch.tsdb.query.aggregator.TimeSeriesInplaceAggregationBuilder;
 import org.opensearch.tsdb.query.aggregator.TimeSeriesUnfoldAggregationBuilder;
 import org.opensearch.tsdb.query.aggregator.TSDBStatsAggregationBuilder;
 import org.opensearch.tsdb.query.rest.RemoteIndexSettingsCache;
@@ -523,6 +524,18 @@ public class TSDBPlugin extends Plugin implements SearchPlugin, EnginePlugin, Ac
     );
 
     /**
+     * Setting to enable inplace aggregation as the default for all queries.
+     * When enabled, queries will use inplace aggregation unless explicitly overridden
+     * by the per-query 'inplace_aggregation' REST parameter.
+     */
+    public static final Setting<Boolean> TSDB_ENGINE_INPLACE_AGGREGATION_ENABLED = Setting.boolSetting(
+        "tsdb_engine.query.inplace_aggregation_enabled",
+        false,  // default: false (inplace aggregation disabled)
+        Setting.Property.NodeScope,
+        Setting.Property.Dynamic
+    );
+
+    /**
      * Setting to enable sending compressed time series data chunks to the coordinator node
      * When enabled, data nodes will send the compressed time series data chunks to the coordinator node, reducing network costs.
      */
@@ -748,6 +761,7 @@ public class TSDBPlugin extends Plugin implements SearchPlugin, EnginePlugin, Ac
             TSDB_ENGINE_WILDCARD_QUERY_CACHE_MAX_SIZE,
             TSDB_ENGINE_WILDCARD_QUERY_CACHE_EXPIRE_AFTER,
             TSDB_ENGINE_FORCE_NO_PUSHDOWN,
+            TSDB_ENGINE_INPLACE_AGGREGATION_ENABLED,
             TSDB_ENGINE_ENABLE_INTERNAL_AGG_CHUNK_COMPRESSION,
             TSDB_ENGINE_CCS_MINIMIZE_ROUNDTRIPS,
             TSDB_ENGINE_DEFAULT_STEP,
@@ -801,7 +815,12 @@ public class TSDBPlugin extends Plugin implements SearchPlugin, EnginePlugin, Ac
             ).addResultReader(InternalTimeSeries::new).setAggregatorRegistrar(TimeSeriesUnfoldAggregationBuilder::registerAggregators),
             new AggregationSpec(TSDBStatsAggregationBuilder.NAME, TSDBStatsAggregationBuilder::new, TSDBStatsAggregationBuilder::parse)
                 .addResultReader(InternalTSDBStats::new)
-                .setAggregatorRegistrar(TSDBStatsAggregationBuilder::registerAggregators)
+                .setAggregatorRegistrar(TSDBStatsAggregationBuilder::registerAggregators),
+            new AggregationSpec(
+                TimeSeriesInplaceAggregationBuilder.NAME,
+                TimeSeriesInplaceAggregationBuilder::new,
+                TimeSeriesInplaceAggregationBuilder::parse
+            ).addResultReader(InternalTimeSeries::new).setAggregatorRegistrar(TimeSeriesInplaceAggregationBuilder::registerAggregators)
         );
     }
 

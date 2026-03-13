@@ -86,6 +86,21 @@ public abstract class BaseQueryExecutor {
                 }
                 validateErrorResponse(query.name(), query.expected().errorMessage(), e.getMessage());
             }
+
+            // For every success query that isn't already inplace_aggregation, also run with inplace_aggregation=true
+            // and validate identical results. Non-eligible queries silently fall back to unfold.
+            if (!query.isInplaceAggregation() && STATUS_SUCCESS.equals(expectedStatus)) {
+                QueryConfig inplaceQuery = query.withInplaceAggregation(true);
+                try {
+                    PromMatrixResponse inplaceResponse = executeQuery(inplaceQuery, inplaceQuery.indices());
+                    validateResponse(testCase, inplaceQuery, inplaceResponse);
+                } catch (Exception e) {
+                    throw new AssertionError(
+                        inplaceQuery.name() + ": inplace_aggregation variant failed but non-inplace_aggregation succeeded",
+                        e
+                    );
+                }
+            }
         }
     }
 

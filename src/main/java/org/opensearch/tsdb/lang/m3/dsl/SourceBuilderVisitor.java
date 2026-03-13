@@ -12,6 +12,7 @@ import org.opensearch.index.query.MatchNoneQueryBuilder;
 import org.opensearch.index.query.QueryBuilder;
 import org.opensearch.index.query.QueryBuilders;
 import org.opensearch.search.aggregations.PipelineAggregationBuilder;
+import org.opensearch.search.aggregations.AbstractAggregationBuilder;
 import org.opensearch.search.aggregations.bucket.filter.FilterAggregationBuilder;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.telemetry.metrics.Counter;
@@ -32,6 +33,7 @@ import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.TagSubPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.FallbackSeriesBinaryPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.IntersectPlanNode;
 import org.opensearch.tsdb.lang.m3.stage.AbsStage;
+import org.opensearch.tsdb.lang.m3.stage.AbstractGroupingStage;
 import org.opensearch.tsdb.lang.m3.stage.AliasByTagsStage;
 import org.opensearch.tsdb.lang.m3.stage.AliasStage;
 import org.opensearch.tsdb.lang.m3.stage.AsPercentStage;
@@ -84,6 +86,8 @@ import org.opensearch.tsdb.lang.m3.stage.TransformNullStage;
 import org.opensearch.tsdb.lang.m3.stage.TruncateStage;
 import org.opensearch.tsdb.lang.m3.stage.UnionStage;
 import org.opensearch.tsdb.lang.m3.stage.WhereStage;
+import org.opensearch.tsdb.query.aggregator.InplaceAggregationType;
+import org.opensearch.tsdb.query.aggregator.TimeSeriesInplaceAggregationBuilder;
 import org.opensearch.tsdb.lang.m3.stage.summarize.BucketMapper;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.AggregationPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.AliasByTagsPlanNode;
@@ -368,6 +372,14 @@ public class SourceBuilderVisitor extends M3PlanVisitor<SourceBuilderVisitor.Com
             TSDBMetrics.incrementCounter(METRICS.pushdownRequestsTotal, 1, Tags.create().addTag("mode", "disabled"));
         }
 
+        // TODO: Move this to a proper optimizer pass (e.g., a PlanNode optimization pass).
+        // No-op stripping (like RemoveEmptyStage after fetch) should happen as a separate
+        // optimization step, not inline in the visit method.
+        // removeEmpty right after fetch is a no-op — strip it to enable inplace optimization
+        if (!unfoldStages.isEmpty() && unfoldStages.get(0) instanceof RemoveEmptyStage) {
+            unfoldStages.remove(0);
+        }
+
         ComponentHolder holder = new ComponentHolder(planNode.getId());
 
         QueryBuilder query = buildQueryForFetch(planNode, fetchTimeRange);
@@ -384,16 +396,36 @@ public class SourceBuilderVisitor extends M3PlanVisitor<SourceBuilderVisitor.Com
             // we need to copy the cached result, as later there could be some in place modification of the time series
             stageStack.push(new CopyStage());
         } else {
-            TimeSeriesUnfoldAggregationBuilder unfoldPipelineAggregationBuilder = new TimeSeriesUnfoldAggregationBuilder(
-                unfoldName,
-                unfoldStages,
-                fetchTimeRange.start(),
-                fetchTimeRange.end(),
-                params.step()
-            );
+            // Check if eligible for inplace aggregation optimization
+            if (params.inplaceAggregation() && isInplaceEligibleStages(unfoldStages)) {
+                // The single stage is a supported aggregation — use inplace
+                AbstractGroupingStage aggStage = (AbstractGroupingStage) unfoldStages.get(0);
+                InplaceAggregationType inplaceType = mapStageToInplaceType(aggStage);
+                List<String> groupByTags = aggStage.getGroupByLabels();
 
-            // Set the unfold aggregation builder for the FetchPlanNode
-            holder.setUnfoldAggregationBuilder(unfoldPipelineAggregationBuilder);
+                TimeSeriesInplaceAggregationBuilder inplaceAggregationBuilder = new TimeSeriesInplaceAggregationBuilder(
+                    unfoldName,
+                    inplaceType,
+                    groupByTags.isEmpty() ? null : groupByTags,
+                    fetchTimeRange.start(),
+                    fetchTimeRange.end(),
+                    params.step()
+                );
+
+                holder.setUnfoldAggregationBuilder(inplaceAggregationBuilder);
+            } else {
+                // Use traditional unfold aggregation builder
+                TimeSeriesUnfoldAggregationBuilder unfoldPipelineAggregationBuilder = new TimeSeriesUnfoldAggregationBuilder(
+                    unfoldName,
+                    unfoldStages,
+                    fetchTimeRange.start(),
+                    fetchTimeRange.end(),
+                    params.step()
+                );
+
+                // Set the unfold aggregation builder for the FetchPlanNode
+                holder.setUnfoldAggregationBuilder(unfoldPipelineAggregationBuilder);
+            }
             // the reference name here should be the name after lifting
             // since if there's any chance this cache is useful, then this unfold will be eventually lifted to a filter aggregator
             // and whoever refer to this will need a fully qualified name, e.g. '0>0_unfold'
@@ -903,6 +935,32 @@ public class SourceBuilderVisitor extends M3PlanVisitor<SourceBuilderVisitor.Com
         return planNode.getChildren().getFirst().accept(this);
     }
 
+    /**
+     * Check if unfoldStages consists of exactly one supported inplace aggregation stage.
+     *
+     * TODO: Consider adding isInplaceEligible() / getInplaceAggregationType() to
+     * UnaryPipelineStage, or use a factory/registry pattern, instead of instanceof checks
+     * in the visitor.
+     */
+    private boolean isInplaceEligibleStages(List<UnaryPipelineStage> unfoldStages) {
+        if (unfoldStages.size() != 1) {
+            return false;
+        }
+        UnaryPipelineStage stage = unfoldStages.get(0);
+        return stage instanceof SumStage || stage instanceof MinStage || stage instanceof MaxStage || stage instanceof AvgStage;
+    }
+
+    /**
+     * Map a pipeline stage instance to the corresponding InplaceAggregationType.
+     */
+    private InplaceAggregationType mapStageToInplaceType(UnaryPipelineStage stage) {
+        if (stage instanceof SumStage) return InplaceAggregationType.SUM;
+        if (stage instanceof MinStage) return InplaceAggregationType.MIN;
+        if (stage instanceof MaxStage) return InplaceAggregationType.MAX;
+        if (stage instanceof AvgStage) return InplaceAggregationType.AVG;
+        throw new IllegalArgumentException("Unsupported stage for inplace aggregation: " + stage.getName());
+    }
+
     private static void validateChildCountExact(M3PlanNode node, int expected) {
         if (node.getChildren().size() != expected) {
             throw new IllegalStateException(
@@ -1156,7 +1214,7 @@ public class SourceBuilderVisitor extends M3PlanVisitor<SourceBuilderVisitor.Com
         private final List<FilterAggregationBuilder> filterAggregationBuilders;
         private final List<TimeSeriesCoordinatorAggregationBuilder> pipelineAggregationBuilders;
         private final Set<QueryBuilder> dnfQueries; // disjunctive normal form of fetch queries
-        private TimeSeriesUnfoldAggregationBuilder unfoldAggregationBuilder;
+        private AbstractAggregationBuilder<?> unfoldAggregationBuilder;
 
         public ComponentHolder(int id) {
             this.id = id;
@@ -1261,11 +1319,11 @@ public class SourceBuilderVisitor extends M3PlanVisitor<SourceBuilderVisitor.Com
             return pipelineAggregationBuilders;
         }
 
-        private TimeSeriesUnfoldAggregationBuilder getUnfoldAggregationBuilder() {
+        private AbstractAggregationBuilder<?> getUnfoldAggregationBuilder() {
             return unfoldAggregationBuilder;
         }
 
-        private void setUnfoldAggregationBuilder(TimeSeriesUnfoldAggregationBuilder unfoldAggregationBuilder) {
+        private void setUnfoldAggregationBuilder(AbstractAggregationBuilder<?> unfoldAggregationBuilder) {
             this.unfoldAggregationBuilder = unfoldAggregationBuilder;
         }
 

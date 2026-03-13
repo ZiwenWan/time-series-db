@@ -12,12 +12,10 @@ import org.opensearch.core.common.io.stream.StreamOutput;
 import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.core.xcontent.XContentParser;
 import org.opensearch.index.query.QueryShardContext;
-import org.opensearch.search.aggregations.AbstractAggregationBuilder;
 import org.opensearch.search.aggregations.AggregationBuilder;
 import org.opensearch.search.aggregations.AggregatorFactories.Builder;
 import org.opensearch.search.aggregations.AggregatorFactory;
 import org.opensearch.search.aggregations.support.ValuesSourceRegistry;
-import org.opensearch.tsdb.TSDBPlugin;
 import org.opensearch.tsdb.query.stage.PipelineStage;
 import org.opensearch.tsdb.query.stage.PipelineStageFactory;
 import org.opensearch.tsdb.query.stage.UnaryPipelineStage;
@@ -57,14 +55,11 @@ import java.util.Objects;
  *     .step(1000L);
  * }</pre>
  */
-public class TimeSeriesUnfoldAggregationBuilder extends AbstractAggregationBuilder<TimeSeriesUnfoldAggregationBuilder> {
+public class TimeSeriesUnfoldAggregationBuilder extends AbstractTimeSeriesAggregationBuilder<TimeSeriesUnfoldAggregationBuilder> {
     /** The name of the aggregation type */
     public static final String NAME = "time_series_unfold";
 
     private List<UnaryPipelineStage> stages;
-    private final long minTimestamp;
-    private final long maxTimestamp;
-    private final long step;
 
     /**
      * Create a time series unfold aggregation builder.
@@ -83,19 +78,8 @@ public class TimeSeriesUnfoldAggregationBuilder extends AbstractAggregationBuild
         long maxTimestamp,
         long step
     ) {
-        super(name);
-
-        // Validate time range
-        if (maxTimestamp <= minTimestamp) {
-            throw new IllegalArgumentException(
-                "maxTimestamp must be greater than minTimestamp (minTimestamp=" + minTimestamp + ", maxTimestamp=" + maxTimestamp + ")"
-            );
-        }
-
+        super(name, minTimestamp, maxTimestamp, step);
         this.stages = (stages == null || stages.isEmpty()) ? null : stages;
-        this.minTimestamp = minTimestamp;
-        this.maxTimestamp = maxTimestamp;
-        this.step = step;
     }
 
     /**
@@ -106,9 +90,7 @@ public class TimeSeriesUnfoldAggregationBuilder extends AbstractAggregationBuild
      */
     public TimeSeriesUnfoldAggregationBuilder(StreamInput in) throws IOException {
         super(in);
-        this.minTimestamp = in.readLong();
-        this.maxTimestamp = in.readLong();
-        this.step = in.readLong();
+        readTimeRange(in);
 
         int stageCount = in.readInt();
         if (stageCount == 0) {
@@ -135,16 +117,11 @@ public class TimeSeriesUnfoldAggregationBuilder extends AbstractAggregationBuild
     ) {
         super(clone, factoriesBuilder, metadata);
         this.stages = clone.stages;
-        this.minTimestamp = clone.minTimestamp;
-        this.maxTimestamp = clone.maxTimestamp;
-        this.step = clone.step;
     }
 
     @Override
     protected void doWriteTo(StreamOutput out) throws IOException {
-        out.writeLong(minTimestamp);
-        out.writeLong(maxTimestamp);
-        out.writeLong(step);
+        writeTimeRange(out);
 
         if (stages == null) {
             out.writeInt(0);
@@ -316,10 +293,7 @@ public class TimeSeriesUnfoldAggregationBuilder extends AbstractAggregationBuild
     @Override
     protected AggregatorFactory doBuild(QueryShardContext queryShardContext, AggregatorFactory parent, Builder subFactoriesBuilder)
         throws IOException {
-        boolean tsdbEnabled = TSDBPlugin.TSDB_ENGINE_ENABLED.get(queryShardContext.getIndexSettings().getSettings());
-        if (!tsdbEnabled) {
-            throw new IllegalStateException("Time Series Unfold Aggregator can only be used on indices where tsdb_engine.enabled is true");
-        }
+        validateTsdbEnabled(queryShardContext);
         return new TimeSeriesUnfoldAggregatorFactory(
             name,
             queryShardContext,
@@ -331,11 +305,6 @@ public class TimeSeriesUnfoldAggregationBuilder extends AbstractAggregationBuild
             maxTimestamp,
             step
         );
-    }
-
-    @Override
-    public BucketCardinality bucketCardinality() {
-        return BucketCardinality.MANY;
     }
 
     @Override
@@ -356,16 +325,7 @@ public class TimeSeriesUnfoldAggregationBuilder extends AbstractAggregationBuild
         }
 
         TimeSeriesUnfoldAggregationBuilder that = (TimeSeriesUnfoldAggregationBuilder) obj;
-        if (minTimestamp != that.minTimestamp) {
-            return false;
-        }
-        if (maxTimestamp != that.maxTimestamp) {
-            return false;
-        }
-        if (step != that.step) {
-            return false;
-        }
-        return Objects.equals(stages, that.stages);
+        return timeRangeEquals(that) && Objects.equals(stages, that.stages);
     }
 
     @Override
@@ -376,9 +336,7 @@ public class TimeSeriesUnfoldAggregationBuilder extends AbstractAggregationBuild
                 result = 31 * result + stage.hashCode();
             }
         }
-        result = 31 * result + Long.hashCode(minTimestamp);
-        result = 31 * result + Long.hashCode(maxTimestamp);
-        result = 31 * result + Long.hashCode(step);
+        result = 31 * result + timeRangeHashCode();
         return result;
     }
 
@@ -398,33 +356,6 @@ public class TimeSeriesUnfoldAggregationBuilder extends AbstractAggregationBuild
      */
     public List<UnaryPipelineStage> getStages() {
         return stages;
-    }
-
-    /**
-     * Get the minimum timestamp.
-     *
-     * @return The minimum timestamp
-     */
-    public long getMinTimestamp() {
-        return minTimestamp;
-    }
-
-    /**
-     * Get the maximum timestamp.
-     *
-     * @return The maximum timestamp
-     */
-    public long getMaxTimestamp() {
-        return maxTimestamp;
-    }
-
-    /**
-     * Get the step size.
-     *
-     * @return The step size
-     */
-    public long getStep() {
-        return step;
     }
 
     /**
