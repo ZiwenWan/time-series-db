@@ -19,6 +19,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Unit tests for {@link TimeSeriesCoordinatorAggregator}.
@@ -96,5 +97,59 @@ public class TimeSeriesCoordinatorAggregatorTests extends OpenSearchTestCase {
         InternalTimeSeries internal = (InternalTimeSeries) result;
         assertFalse(internal.getTimeSeries().isEmpty());
         assertEquals(1, internal.getTimeSeries().size());
+    }
+
+    /**
+     * doReduce propagates merged execStats and dataSource from input InternalTimeSeries aggregations.
+     */
+    public void testDoReducePropagatesExecStatsAndDataSource() {
+        AggregationExecStats stats1 = new AggregationExecStats(10L, 20L, 30L, 40L, 50L, 60L, 70L);
+        AggregationDataSource ds1 = new AggregationDataSource(
+            Set.of("prometheus"),
+            Set.of(new AggregationDataSource.IndexInfo("2d", "10s"))
+        );
+
+        AggregationExecStats stats2 = new AggregationExecStats(1L, 2L, 3L, 4L, 5L, 6L, 7L);
+        AggregationDataSource ds2 = new AggregationDataSource(Set.of("graphite"), Set.of(new AggregationDataSource.IndexInfo("30d", "1m")));
+
+        InternalTimeSeries unfoldA = new InternalTimeSeries("unfold_a", List.of(), Map.of(), null, stats1, ds1);
+        InternalTimeSeries unfoldB = new InternalTimeSeries("unfold_b", List.of(), Map.of(), null, stats2, ds2);
+
+        Map<String, String> references = Map.of("a", "unfold_a", "b", "unfold_b");
+        TimeSeriesCoordinatorAggregator aggregator = new TimeSeriesCoordinatorAggregator(
+            "test_propagation",
+            new String[0],
+            Collections.emptyList(),
+            new LinkedHashMap<>(),
+            references,
+            "a",
+            Map.of()
+        );
+
+        Aggregations aggregations = new Aggregations(List.of(unfoldA, unfoldB));
+        PipelineAggregator.PipelineTree emptyTree = new PipelineAggregator.PipelineTree(Collections.emptyMap(), Collections.emptyList());
+        InternalAggregation.ReduceContext context = InternalAggregation.ReduceContext.forFinalReduction(null, null, s -> {}, emptyTree);
+
+        InternalAggregation result = aggregator.doReduce(aggregations, context);
+
+        assertTrue(result instanceof InternalTimeSeries);
+        InternalTimeSeries its = (InternalTimeSeries) result;
+
+        // Verify execStats are merged (summed)
+        AggregationExecStats mergedStats = its.getExecStats();
+        assertEquals(11L, mergedStats.seriesNumInput());
+        assertEquals(22L, mergedStats.samplesNumInput());
+        assertEquals(33L, mergedStats.chunksNumClosed());
+        assertEquals(44L, mergedStats.chunksNumLive());
+        assertEquals(55L, mergedStats.docsNumClosed());
+        assertEquals(66L, mergedStats.docsNumLive());
+        assertEquals(77L, mergedStats.memoryBytes());
+
+        // Verify dataSource is merged (unioned)
+        AggregationDataSource mergedDs = its.getDataSource();
+        assertEquals(Set.of("prometheus", "graphite"), mergedDs.origins());
+        assertEquals(2, mergedDs.indexes().size());
+        assertTrue(mergedDs.indexes().contains(new AggregationDataSource.IndexInfo("2d", "10s")));
+        assertTrue(mergedDs.indexes().contains(new AggregationDataSource.IndexInfo("30d", "1m")));
     }
 }

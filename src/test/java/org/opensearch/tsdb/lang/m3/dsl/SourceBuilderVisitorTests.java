@@ -65,6 +65,8 @@ import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.MockFetchPlanNode;
 import org.opensearch.tsdb.lang.m3.m3ql.plan.nodes.MockFetchLinePlanNode;
 import org.opensearch.tsdb.lang.m3.stage.MovingStage;
 import org.opensearch.tsdb.query.aggregator.TimeSeriesCoordinatorAggregationBuilder;
+import org.opensearch.tsdb.query.aggregator.TimeSeriesInplaceAggregationBuilder;
+import org.opensearch.tsdb.query.aggregator.InplaceAggregationType;
 import org.opensearch.tsdb.query.aggregator.TimeSeriesUnfoldAggregationBuilder;
 import org.opensearch.tsdb.query.federation.FederationMetadata;
 import org.opensearch.tsdb.query.rest.ResolvedPartitions;
@@ -101,7 +103,8 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
         10000L,   // step
         true,     // pushdown
         true,     // profile
-        null      // federationMetadata (no federation in tests)
+        null,     // federationMetadata (no federation in tests)
+        false     // inplace_aggregation
     );
 
     private SourceBuilderVisitor visitor;
@@ -1164,7 +1167,7 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
         movingPlanNode.addChild(fetchPlanNode);
 
         SourceBuilderVisitor visitor = new SourceBuilderVisitor(
-            new M3OSTranslator.Params(Constants.Time.DEFAULT_TIME_UNIT, 1000000L, 2000000L, 10000L, false, false, null)
+            new M3OSTranslator.Params(Constants.Time.DEFAULT_TIME_UNIT, 1000000L, 2000000L, 10000L, false, false, null, false)
         );
 
         SourceBuilderVisitor.ComponentHolder results = visitor.visit(movingPlanNode);
@@ -1199,7 +1202,7 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
         movingPlanNode.addChild(fetchPlanNode);
 
         SourceBuilderVisitor visitor = new SourceBuilderVisitor(
-            new M3OSTranslator.Params(TimeUnit.SECONDS, 1000000L, 2000000L, 10000L, true, false, null)
+            new M3OSTranslator.Params(TimeUnit.SECONDS, 1000000L, 2000000L, 10000L, true, false, null, false)
         );
 
         SourceBuilderVisitor.ComponentHolder results = visitor.visit(movingPlanNode);
@@ -1277,7 +1280,8 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
             10000L,
             true,
             false,
-            federationMetadata
+            federationMetadata,
+            false
         );
 
         assertFalse(SourceBuilderVisitor.shouldDisablePushdown(params));
@@ -1300,7 +1304,8 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
             10000L,
             true,
             false,
-            federationMetadata
+            federationMetadata,
+            false
         );
 
         assertTrue(SourceBuilderVisitor.shouldDisablePushdown(params));
@@ -1407,6 +1412,197 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
         assertEquals("OffsetPlanNode must have exactly one child", exception.getMessage());
     }
 
+    // ========== Inplace Aggregation Path Tests ==========
+
+    /**
+     * Test that inplace_aggregation=true with a single SUM aggregation produces TimeSeriesInplaceAggregationBuilder.
+     */
+    public void testInplaceEligibleSumAggregation() {
+        M3OSTranslator.Params inplaceParams = new M3OSTranslator.Params(
+            Constants.Time.DEFAULT_TIME_UNIT,
+            1000000L,
+            2000000L,
+            10000L,
+            true,
+            false,
+            null,
+            true // inplace_aggregation enabled
+        );
+        SourceBuilderVisitor inplaceVisitor = new SourceBuilderVisitor(inplaceParams);
+
+        AggregationPlanNode aggNode = new AggregationPlanNode(1, AggregationType.SUM, List.of("region"));
+        aggNode.addChild(createMockFetchNode(2));
+
+        SourceBuilderVisitor.ComponentHolder result = inplaceVisitor.visit(aggNode);
+        SearchSourceBuilder builder = result.toSearchSourceBuilder();
+
+        Collection<AggregationBuilder> aggregations = builder.aggregations().getAggregatorFactories();
+        assertEquals(1, aggregations.size());
+        AggregationBuilder aggBuilder = aggregations.iterator().next();
+        assertTrue("Should use inplace builder for eligible SUM", aggBuilder instanceof TimeSeriesInplaceAggregationBuilder);
+
+        TimeSeriesInplaceAggregationBuilder inplaceBuilder = (TimeSeriesInplaceAggregationBuilder) aggBuilder;
+        assertEquals(InplaceAggregationType.SUM, inplaceBuilder.getAggregationType());
+        assertEquals(List.of("region"), inplaceBuilder.getGroupByTags());
+    }
+
+    /**
+     * Test inplace path with MIN aggregation.
+     */
+    public void testInplaceEligibleMinAggregation() {
+        M3OSTranslator.Params inplaceParams = new M3OSTranslator.Params(
+            Constants.Time.DEFAULT_TIME_UNIT,
+            1000000L,
+            2000000L,
+            10000L,
+            true,
+            false,
+            null,
+            true
+        );
+        SourceBuilderVisitor inplaceVisitor = new SourceBuilderVisitor(inplaceParams);
+
+        AggregationPlanNode aggNode = new AggregationPlanNode(1, AggregationType.MIN, List.of("host"));
+        aggNode.addChild(createMockFetchNode(2));
+
+        SourceBuilderVisitor.ComponentHolder result = inplaceVisitor.visit(aggNode);
+        SearchSourceBuilder builder = result.toSearchSourceBuilder();
+
+        AggregationBuilder aggBuilder = builder.aggregations().getAggregatorFactories().iterator().next();
+        assertTrue("Should use inplace builder for eligible MIN", aggBuilder instanceof TimeSeriesInplaceAggregationBuilder);
+        assertEquals(InplaceAggregationType.MIN, ((TimeSeriesInplaceAggregationBuilder) aggBuilder).getAggregationType());
+    }
+
+    /**
+     * Test inplace path with MAX aggregation.
+     */
+    public void testInplaceEligibleMaxAggregation() {
+        M3OSTranslator.Params inplaceParams = new M3OSTranslator.Params(
+            Constants.Time.DEFAULT_TIME_UNIT,
+            1000000L,
+            2000000L,
+            10000L,
+            true,
+            false,
+            null,
+            true
+        );
+        SourceBuilderVisitor inplaceVisitor = new SourceBuilderVisitor(inplaceParams);
+
+        AggregationPlanNode aggNode = new AggregationPlanNode(1, AggregationType.MAX, List.of("host"));
+        aggNode.addChild(createMockFetchNode(2));
+
+        SourceBuilderVisitor.ComponentHolder result = inplaceVisitor.visit(aggNode);
+        SearchSourceBuilder builder = result.toSearchSourceBuilder();
+
+        AggregationBuilder aggBuilder = builder.aggregations().getAggregatorFactories().iterator().next();
+        assertTrue("Should use inplace builder for eligible MAX", aggBuilder instanceof TimeSeriesInplaceAggregationBuilder);
+        assertEquals(InplaceAggregationType.MAX, ((TimeSeriesInplaceAggregationBuilder) aggBuilder).getAggregationType());
+    }
+
+    /**
+     * Test inplace path with AVG aggregation.
+     */
+    public void testInplaceEligibleAvgAggregation() {
+        M3OSTranslator.Params inplaceParams = new M3OSTranslator.Params(
+            Constants.Time.DEFAULT_TIME_UNIT,
+            1000000L,
+            2000000L,
+            10000L,
+            true,
+            false,
+            null,
+            true
+        );
+        SourceBuilderVisitor inplaceVisitor = new SourceBuilderVisitor(inplaceParams);
+
+        AggregationPlanNode aggNode = new AggregationPlanNode(1, AggregationType.AVG, List.of("host"));
+        aggNode.addChild(createMockFetchNode(2));
+
+        SourceBuilderVisitor.ComponentHolder result = inplaceVisitor.visit(aggNode);
+        SearchSourceBuilder builder = result.toSearchSourceBuilder();
+
+        AggregationBuilder aggBuilder = builder.aggregations().getAggregatorFactories().iterator().next();
+        assertTrue("Should use inplace builder for eligible AVG", aggBuilder instanceof TimeSeriesInplaceAggregationBuilder);
+        assertEquals(InplaceAggregationType.AVG, ((TimeSeriesInplaceAggregationBuilder) aggBuilder).getAggregationType());
+    }
+
+    /**
+     * Test inplace path with global aggregation (empty tags → null groupByTags in builder).
+     */
+    public void testInplaceEligibleGlobalAggregation() {
+        M3OSTranslator.Params inplaceParams = new M3OSTranslator.Params(
+            Constants.Time.DEFAULT_TIME_UNIT,
+            1000000L,
+            2000000L,
+            10000L,
+            true,
+            false,
+            null,
+            true
+        );
+        SourceBuilderVisitor inplaceVisitor = new SourceBuilderVisitor(inplaceParams);
+
+        // Empty tags list → global aggregation
+        AggregationPlanNode aggNode = new AggregationPlanNode(1, AggregationType.SUM, Collections.emptyList());
+        aggNode.addChild(createMockFetchNode(2));
+
+        SourceBuilderVisitor.ComponentHolder result = inplaceVisitor.visit(aggNode);
+        SearchSourceBuilder builder = result.toSearchSourceBuilder();
+
+        AggregationBuilder aggBuilder = builder.aggregations().getAggregatorFactories().iterator().next();
+        assertTrue("Should use inplace builder for global aggregation", aggBuilder instanceof TimeSeriesInplaceAggregationBuilder);
+
+        TimeSeriesInplaceAggregationBuilder inplaceBuilder = (TimeSeriesInplaceAggregationBuilder) aggBuilder;
+        assertNull("Global aggregation should have null groupByTags", inplaceBuilder.getGroupByTags());
+    }
+
+    /**
+     * Test that non-inplace-eligible aggregation type (COUNT) falls back to unfold.
+     */
+    public void testInplaceIneligibleMultipleStages() {
+        M3OSTranslator.Params inplaceParams = new M3OSTranslator.Params(
+            Constants.Time.DEFAULT_TIME_UNIT,
+            1000000L,
+            2000000L,
+            10000L,
+            true,
+            false,
+            null,
+            true // inplace_aggregation enabled but aggregation type is ineligible
+        );
+        SourceBuilderVisitor inplaceVisitor = new SourceBuilderVisitor(inplaceParams);
+
+        // COUNT is not a inplace-eligible aggregation type (only SUM/MIN/MAX/AVG are)
+        AggregationPlanNode aggNode = new AggregationPlanNode(1, AggregationType.COUNT, List.of("host"));
+        aggNode.addChild(createMockFetchNode(2));
+
+        SourceBuilderVisitor.ComponentHolder result = inplaceVisitor.visit(aggNode);
+        SearchSourceBuilder builder = result.toSearchSourceBuilder();
+
+        Collection<AggregationBuilder> aggregations = builder.aggregations().getAggregatorFactories();
+        assertEquals(1, aggregations.size());
+        AggregationBuilder aggBuilder = aggregations.iterator().next();
+        assertTrue("Non-eligible agg type should fall back to unfold builder", aggBuilder instanceof TimeSeriesUnfoldAggregationBuilder);
+    }
+
+    /**
+     * Test that inplace_aggregation=false falls back to unfold even with eligible stages.
+     */
+    public void testInplaceDisabledFallsBackToUnfold() {
+        // Default visitor has inplace_aggregation=false
+        AggregationPlanNode aggNode = new AggregationPlanNode(1, AggregationType.SUM, List.of("region"));
+        aggNode.addChild(createMockFetchNode(2));
+
+        SourceBuilderVisitor.ComponentHolder result = visitor.visit(aggNode);
+        SearchSourceBuilder builder = result.toSearchSourceBuilder();
+
+        Collection<AggregationBuilder> aggregations = builder.aggregations().getAggregatorFactories();
+        assertEquals(1, aggregations.size());
+        AggregationBuilder aggBuilder = aggregations.iterator().next();
+        assertTrue("inplace_aggregation=false should use unfold builder", aggBuilder instanceof TimeSeriesUnfoldAggregationBuilder);
+    }
+
     /**
      * Helper method to create a mock FetchPlanNode.
      */
@@ -1451,7 +1647,8 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
             1L,       // step - 1ms
             true,
             true,
-            null
+            null,
+            false     // inplace_aggregation
         );
         SourceBuilderVisitor truncateVisitor = new SourceBuilderVisitor(truncateParams);
 
@@ -1532,7 +1729,8 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
             10000L,
             true, // pushdown enabled
             false,
-            null
+            null,
+            false
         );
         SourceBuilderVisitor visitor = new SourceBuilderVisitor(params);
 
@@ -1573,7 +1771,8 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
             10000L,
             false, // pushdown disabled
             false,
-            null
+            null,
+            false
         );
         SourceBuilderVisitor visitor = new SourceBuilderVisitor(params);
 
@@ -1619,7 +1818,8 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
             10000L,
             true, // pushdown enabled
             false,
-            federationMetadata
+            federationMetadata,
+            false
         );
         SourceBuilderVisitor visitor = new SourceBuilderVisitor(params);
 
@@ -1666,7 +1866,8 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
             10000L,
             true, // pushdown arg enabled
             false,
-            federationMetadata // but overlapping partitions override this
+            federationMetadata, // but overlapping partitions override this
+            false
         );
         SourceBuilderVisitor visitor = new SourceBuilderVisitor(params);
 
@@ -1712,7 +1913,8 @@ public class SourceBuilderVisitorTests extends OpenSearchTestCase {
             10000L,
             false, // pushdown disabled by arg
             false,
-            federationMetadata // partitions don't interfere
+            federationMetadata, // partitions don't interfere
+            false
         );
         SourceBuilderVisitor visitor = new SourceBuilderVisitor(params);
 

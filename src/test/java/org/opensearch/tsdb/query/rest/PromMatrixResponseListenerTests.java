@@ -27,6 +27,8 @@ import org.opensearch.tsdb.core.model.ByteLabels;
 import org.opensearch.tsdb.core.model.FloatSample;
 import org.opensearch.tsdb.core.model.Labels;
 import org.opensearch.tsdb.core.model.Sample;
+import org.opensearch.tsdb.query.aggregator.AggregationExecStats;
+import org.opensearch.tsdb.query.aggregator.AggregationDataSource;
 import org.opensearch.tsdb.metrics.TSDBMetrics;
 import org.opensearch.tsdb.query.aggregator.InternalTimeSeries;
 import org.opensearch.tsdb.query.aggregator.TimeSeries;
@@ -37,6 +39,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
@@ -628,7 +631,16 @@ public class PromMatrixResponseListenerTests extends OpenSearchTestCase {
 
         // Create listener
         FakeRestChannel channel = new FakeRestChannel(new FakeRestRequest(), true, 1);
-        PromMatrixResponseListener listener = new PromMatrixResponseListener(channel, TEST_AGG_NAME, false, false, true, queryMetrics);
+        PromMatrixResponseListener listener = new PromMatrixResponseListener(
+            channel,
+            TEST_AGG_NAME,
+            false,
+            false,
+            true,
+            false,
+            true,
+            queryMetrics
+        );
 
         // Create search response without profile results
         List<TimeSeries> timeSeriesList = createTimeSeriesWithLabels();
@@ -675,7 +687,16 @@ public class PromMatrixResponseListenerTests extends OpenSearchTestCase {
 
         // Create listener with profile enabled
         FakeRestChannel channel = new FakeRestChannel(new FakeRestRequest(), true, 1);
-        PromMatrixResponseListener listener = new PromMatrixResponseListener(channel, TEST_AGG_NAME, true, false, true, queryMetrics);
+        PromMatrixResponseListener listener = new PromMatrixResponseListener(
+            channel,
+            TEST_AGG_NAME,
+            true,
+            false,
+            true,
+            false,
+            true,
+            queryMetrics
+        );
 
         // Create search response with profile results
         SearchResponse searchResponse = createSearchResponseWithProfile(
@@ -743,7 +764,16 @@ public class PromMatrixResponseListenerTests extends OpenSearchTestCase {
 
         // Create listener
         FakeRestChannel channel = new FakeRestChannel(new FakeRestRequest(), true, 1);
-        PromMatrixResponseListener listener = new PromMatrixResponseListener(channel, TEST_AGG_NAME, false, false, true, queryMetrics);
+        PromMatrixResponseListener listener = new PromMatrixResponseListener(
+            channel,
+            TEST_AGG_NAME,
+            false,
+            false,
+            true,
+            false,
+            true,
+            queryMetrics
+        );
 
         // Create search response
         List<TimeSeries> timeSeriesList = createTimeSeriesWithLabels();
@@ -790,7 +820,16 @@ public class PromMatrixResponseListenerTests extends OpenSearchTestCase {
 
         // Create listener with profile enabled
         FakeRestChannel channel = new FakeRestChannel(new FakeRestRequest(), true, 1);
-        PromMatrixResponseListener listener = new PromMatrixResponseListener(channel, TEST_AGG_NAME, true, false, true, queryMetrics);
+        PromMatrixResponseListener listener = new PromMatrixResponseListener(
+            channel,
+            TEST_AGG_NAME,
+            true,
+            false,
+            true,
+            false,
+            true,
+            queryMetrics
+        );
 
         // Create search response with 3 shards with varying times
         // Shard 1: collect=100ms, reduce=50ms
@@ -1785,5 +1824,161 @@ public class PromMatrixResponseListenerTests extends OpenSearchTestCase {
                 return idA.compareTo(idB);
             });
         }
+    }
+
+    // ========== ExecStats Tests ==========
+
+    public void testResponseIncludesExecStats_whenEnabled() throws Exception {
+        // Arrange
+        AggregationExecStats execStats = new AggregationExecStats(10L, 20L, 30L, 40L, 50L, 60L, 70L);
+
+        List<TimeSeries> timeSeriesList = createTimeSeriesWithLabels();
+        InternalTimeSeries its = new InternalTimeSeries(
+            TEST_AGG_NAME,
+            timeSeriesList,
+            TEST_METADATA,
+            null,
+            execStats,
+            AggregationDataSource.EMPTY
+        );
+        Aggregations aggregations = new Aggregations(List.of(its));
+        SearchResponse searchResponse = mock(SearchResponse.class);
+        when(searchResponse.getAggregations()).thenReturn(aggregations);
+
+        FakeRestChannel channel = new FakeRestChannel(new FakeRestRequest(), true, 1);
+        PromMatrixResponseListener listener = new PromMatrixResponseListener(channel, TEST_AGG_NAME, false, false, true, true, false, null);
+        XContentBuilder builder = JsonXContent.contentBuilder();
+
+        // Act
+        RestResponse response = listener.buildResponse(searchResponse, builder);
+
+        // Assert
+        assertEquals(RestStatus.OK, response.status());
+        Map<String, Object> parsed = parseJsonResponse(response.content().utf8ToString());
+
+        // Verify execStats structure (excluding latencyMs which is non-deterministic)
+        Map<String, Object> actualExecStats = (Map<String, Object>) parsed.get("execStats");
+        assertNotNull("execStats should be present", actualExecStats);
+        assertTrue("latencyMs should be present and positive", ((Number) actualExecStats.get("latencyMs")).doubleValue() >= 0);
+
+        // Remove latencyMs for structural comparison
+        actualExecStats.remove("latencyMs");
+
+        String expectedExecStatsJson = """
+            {
+              "data": {
+                "series": {
+                  "numInput": 10,
+                  "numOutput": 1
+                },
+                "samples": {
+                  "numInput": 20,
+                  "numOutput": 1
+                }
+              },
+              "storage": {
+                "chunks": {
+                  "closed": 30,
+                  "live": 40
+                },
+                "documents": {
+                  "closed": 50,
+                  "live": 60
+                }
+              },
+              "resource": {
+                "memoryBytes": 70
+              }
+            }
+            """;
+        Map<String, Object> expectedExecStats = parseJsonResponse(expectedExecStatsJson);
+        assertEquals("execStats structure should match expected", expectedExecStats, actualExecStats);
+    }
+
+    public void testResponseExcludesExecStats_byDefault() throws Exception {
+        // Arrange
+        FakeRestChannel channel = new FakeRestChannel(new FakeRestRequest(), true, 1);
+        PromMatrixResponseListener listener = new PromMatrixResponseListener(channel, TEST_AGG_NAME, false, false, true);
+
+        List<TimeSeries> timeSeriesList = createTimeSeriesWithLabels();
+        SearchResponse searchResponse = createSearchResponse(TEST_AGG_NAME, timeSeriesList);
+        XContentBuilder builder = JsonXContent.contentBuilder();
+
+        // Act
+        RestResponse response = listener.buildResponse(searchResponse, builder);
+
+        // Assert
+        assertEquals(RestStatus.OK, response.status());
+        String responseContent = response.content().utf8ToString();
+        assertFalse("execStats should NOT be present by default", responseContent.contains("\"execStats\""));
+    }
+
+    // ========== DataSource Tests ==========
+
+    public void testResponseIncludesDataSource_whenEnabled() throws Exception {
+        // Arrange
+        AggregationDataSource dataSource = new AggregationDataSource(
+            Set.of("prometheus"),
+            Set.of(new AggregationDataSource.IndexInfo("2d", "10s"))
+        );
+
+        List<TimeSeries> timeSeriesList = createTimeSeriesWithLabels();
+        InternalTimeSeries its = new InternalTimeSeries(
+            TEST_AGG_NAME,
+            timeSeriesList,
+            TEST_METADATA,
+            null,
+            AggregationExecStats.EMPTY,
+            dataSource
+        );
+        Aggregations aggregations = new Aggregations(List.of(its));
+        SearchResponse searchResponse = mock(SearchResponse.class);
+        when(searchResponse.getAggregations()).thenReturn(aggregations);
+
+        FakeRestChannel channel = new FakeRestChannel(new FakeRestRequest(), true, 1);
+        PromMatrixResponseListener listener = new PromMatrixResponseListener(channel, TEST_AGG_NAME, false, false, false, true, true, null);
+        XContentBuilder builder = JsonXContent.contentBuilder();
+
+        // Act
+        RestResponse response = listener.buildResponse(searchResponse, builder);
+
+        // Assert
+        assertEquals(RestStatus.OK, response.status());
+        Map<String, Object> parsed = parseJsonResponse(response.content().utf8ToString());
+
+        Map<String, Object> actualDataSource = (Map<String, Object>) parsed.get("dataSource");
+        assertNotNull("dataSource should be present", actualDataSource);
+
+        String expectedDataSourceJson = """
+            {
+              "origin": ["prometheus"],
+              "indexes": [
+                {
+                  "index": "2d",
+                  "stepSize": "10s"
+                }
+              ]
+            }
+            """;
+        Map<String, Object> expectedDataSource = parseJsonResponse(expectedDataSourceJson);
+        assertEquals("dataSource structure should match expected", expectedDataSource, actualDataSource);
+    }
+
+    public void testResponseExcludesDataSource_byDefault() throws Exception {
+        // Arrange
+        FakeRestChannel channel = new FakeRestChannel(new FakeRestRequest(), true, 1);
+        PromMatrixResponseListener listener = new PromMatrixResponseListener(channel, TEST_AGG_NAME, false, false, true);
+
+        List<TimeSeries> timeSeriesList = createTimeSeriesWithLabels();
+        SearchResponse searchResponse = createSearchResponse(TEST_AGG_NAME, timeSeriesList);
+        XContentBuilder builder = JsonXContent.contentBuilder();
+
+        // Act
+        RestResponse response = listener.buildResponse(searchResponse, builder);
+
+        // Assert
+        assertEquals(RestStatus.OK, response.status());
+        String responseContent = response.content().utf8ToString();
+        assertFalse("dataSource should NOT be present by default", responseContent.contains("\"dataSource\""));
     }
 }

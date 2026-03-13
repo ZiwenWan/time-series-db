@@ -1,0 +1,1393 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * The OpenSearch Contributors require contributions made to
+ * this file be licensed under the Apache-2.0 license or a
+ * compatible open source license.
+ */
+package org.opensearch.tsdb.query.aggregator;
+
+import org.apache.lucene.codecs.StoredFieldsReader;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.index.CompositeReader;
+import org.apache.lucene.index.DirectoryReader;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.index.IndexWriterConfig;
+import org.apache.lucene.index.LeafReader;
+import org.apache.lucene.index.LeafReaderContext;
+import org.apache.lucene.index.StoredFields;
+import org.apache.lucene.index.Term;
+import org.apache.lucene.index.TermVectors;
+import org.apache.lucene.store.ByteBuffersDirectory;
+import org.apache.lucene.store.Directory;
+import org.opensearch.common.util.BigArrays;
+import org.opensearch.core.common.breaker.CircuitBreakingException;
+import org.opensearch.core.common.breaker.NoopCircuitBreaker;
+import org.opensearch.core.indices.breaker.CircuitBreakerService;
+import org.opensearch.core.indices.breaker.NoneCircuitBreakerService;
+import org.opensearch.index.query.QueryShardContext;
+import org.opensearch.search.aggregations.Aggregator;
+import org.opensearch.search.aggregations.AggregatorFactories;
+import org.opensearch.search.aggregations.CardinalityUpperBound;
+import org.opensearch.search.aggregations.InternalAggregation;
+import org.opensearch.search.aggregations.LeafBucketCollector;
+import org.opensearch.search.internal.SearchContext;
+import org.opensearch.test.OpenSearchTestCase;
+import org.opensearch.tsdb.core.chunk.ChunkIterator;
+import org.opensearch.tsdb.core.model.Labels;
+import org.opensearch.tsdb.core.model.SampleList;
+import org.opensearch.tsdb.core.reader.TSDBDocValues;
+import org.opensearch.tsdb.core.reader.TSDBLeafReader;
+import org.opensearch.tsdb.lang.m3.stage.AvgStage;
+import org.opensearch.tsdb.lang.m3.stage.MaxStage;
+import org.opensearch.tsdb.lang.m3.stage.MinStage;
+import org.opensearch.tsdb.lang.m3.stage.SumStage;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.function.IntFunction;
+
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+/**
+ * Unit tests for TimeSeriesInplaceAggregator and TimeSeriesInplaceAggregatorFactory.
+ */
+public class TimeSeriesInplaceAggregatorTests extends OpenSearchTestCase {
+
+    // ---- Leaf pruning tests ----
+
+    public void testGetLeafCollectorWithNonOverlappingTimeRange() throws IOException {
+        long queryMin = 1000L;
+        long queryMax = 5000L;
+        long step = 100L;
+
+        TimeSeriesInplaceAggregator aggregator = createInplaceAggregator(InplaceAggregationType.SUM, null, queryMin, queryMax, step);
+
+        TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(6000L, 10000L);
+        LeafBucketCollector mockSub = mock(LeafBucketCollector.class);
+
+        LeafBucketCollector result = aggregator.getLeafCollector(readerCtx.context, mockSub);
+        assertSame("Should return sub-collector when leaf does not overlap time range", mockSub, result);
+
+        readerCtx.directoryReader.close();
+        readerCtx.directory.close();
+        aggregator.close();
+    }
+
+    public void testGetLeafCollectorWithOverlappingTimeRange() throws IOException {
+        long queryMin = 1000L;
+        long queryMax = 5000L;
+        long step = 100L;
+
+        TimeSeriesInplaceAggregator aggregator = createInplaceAggregator(InplaceAggregationType.SUM, null, queryMin, queryMax, step);
+
+        TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(2000L, 6000L);
+        LeafBucketCollector mockSub = mock(LeafBucketCollector.class);
+
+        LeafBucketCollector result = aggregator.getLeafCollector(readerCtx.context, mockSub);
+        assertNotSame("Should return new collector when leaf overlaps time range", mockSub, result);
+        assertNotNull("Should return a non-null collector", result);
+
+        readerCtx.directoryReader.close();
+        readerCtx.directory.close();
+        aggregator.close();
+    }
+
+    // ---- buildEmptyAggregation ----
+
+    public void testBuildEmptyAggregation() throws IOException {
+        TimeSeriesInplaceAggregator aggregator = createInplaceAggregator(InplaceAggregationType.SUM, null, 1000L, 5000L, 100L);
+
+        InternalAggregation emptyAgg = aggregator.buildEmptyAggregation();
+        assertNotNull("Empty aggregation should not be null", emptyAgg);
+        assertTrue("Empty aggregation should be InternalTimeSeries", emptyAgg instanceof InternalTimeSeries);
+
+        InternalTimeSeries ts = (InternalTimeSeries) emptyAgg;
+        assertEquals("Empty aggregation should have correct name", "test_inplace_agg", ts.getName());
+        assertTrue("Empty aggregation should have empty series list", ts.getTimeSeries().isEmpty());
+
+        aggregator.close();
+    }
+
+    // ---- createReduceStage ----
+
+    public void testCreateReduceStageForEachType() throws IOException {
+        // Test global aggregation (no groupByTags) for each type
+        assertReduceStageType(InplaceAggregationType.SUM, null, SumStage.class);
+        assertReduceStageType(InplaceAggregationType.MIN, null, MinStage.class);
+        assertReduceStageType(InplaceAggregationType.MAX, null, MaxStage.class);
+        assertReduceStageType(InplaceAggregationType.AVG, null, AvgStage.class);
+
+        // Test with empty groupByTags (should still produce same stage types)
+        assertReduceStageType(InplaceAggregationType.SUM, List.of(), SumStage.class);
+        assertReduceStageType(InplaceAggregationType.MIN, List.of(), MinStage.class);
+        assertReduceStageType(InplaceAggregationType.MAX, List.of(), MaxStage.class);
+        assertReduceStageType(InplaceAggregationType.AVG, List.of(), AvgStage.class);
+
+        // Test with groupByTags
+        List<String> tags = List.of("host", "region");
+        assertReduceStageType(InplaceAggregationType.SUM, tags, SumStage.class);
+        assertReduceStageType(InplaceAggregationType.MIN, tags, MinStage.class);
+        assertReduceStageType(InplaceAggregationType.MAX, tags, MaxStage.class);
+        assertReduceStageType(InplaceAggregationType.AVG, tags, AvgStage.class);
+    }
+
+    private void assertReduceStageType(InplaceAggregationType type, List<String> groupByTags, Class<?> expectedStageClass)
+        throws IOException {
+        TimeSeriesInplaceAggregator aggregator = createInplaceAggregator(type, groupByTags, 1000L, 5000L, 100L);
+
+        InternalAggregation[] results = aggregator.buildAggregations(new long[] { 0 });
+        assertEquals(1, results.length);
+        assertTrue(results[0] instanceof InternalTimeSeries);
+
+        InternalTimeSeries ts = (InternalTimeSeries) results[0];
+        assertNotNull("Reduce stage should not be null", ts.getReduceStage());
+        assertTrue(
+            "Reduce stage for "
+                + type
+                + " should be "
+                + expectedStageClass.getSimpleName()
+                + " but was "
+                + ts.getReduceStage().getClass().getSimpleName(),
+            expectedStageClass.isInstance(ts.getReduceStage())
+        );
+
+        aggregator.close();
+    }
+
+    // ---- calculateTimeArraySize ----
+
+    public void testCalculateTimeArraySize() throws IOException {
+        // Use factory's getEstimatedTimeArraySize() which uses the same formula
+        TimeSeriesInplaceAggregatorFactory factory = createFactory(InplaceAggregationType.SUM, null, 1000L, 5000L, 100L);
+        // (5000 - 1 - 1000) / 100 + 1 = 40
+        assertEquals(40, factory.getEstimatedTimeArraySize());
+
+        // Edge case: single point
+        TimeSeriesInplaceAggregatorFactory singlePointFactory = createFactory(InplaceAggregationType.SUM, null, 1000L, 1000L, 100L);
+        // (1000 - 1000) / 100 + 1 = 1
+        assertEquals(1, singlePointFactory.getEstimatedTimeArraySize());
+
+        // Larger range
+        TimeSeriesInplaceAggregatorFactory largeFactory = createFactory(InplaceAggregationType.SUM, null, 0L, 3600000L, 300000L);
+        // (3600000 - 1 - 0) / 300000 + 1 = 12
+        assertEquals(12, largeFactory.getEstimatedTimeArraySize());
+    }
+
+    // ---- Factory tests ----
+
+    public void testSupportsConcurrentSegmentSearch() throws IOException {
+        TimeSeriesInplaceAggregatorFactory factory = createFactory(InplaceAggregationType.SUM, null, 1000L, 5000L, 100L);
+        assertTrue("Inplace aggregation factory should support concurrent segment search", factory.supportsConcurrentSegmentSearch());
+    }
+
+    public void testFactoryConfiguration() throws IOException {
+        List<String> tags = List.of("host", "region");
+        TimeSeriesInplaceAggregatorFactory factory = createFactory(InplaceAggregationType.AVG, tags, 2000L, 8000L, 500L);
+
+        assertEquals(InplaceAggregationType.AVG, factory.getAggregationType());
+        assertEquals(tags, factory.getGroupByTags());
+        assertEquals(2000L, factory.getMinTimestamp());
+        assertEquals(8000L, factory.getMaxTimestamp());
+        assertEquals(500L, factory.getStep());
+    }
+
+    // ---- No-tag aggregation data processing tests ----
+
+    public void testNoTagSumAggregation() throws IOException {
+        long min = 1000L, max = 4000L, step = 1000L;
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.SUM, null, min, max, step);
+
+        TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L, 2000L, 3000L } },
+            new double[][] { { 10.0, 20.0, 30.0 } },
+            docId -> mock(Labels.class)
+        );
+
+        LeafBucketCollector collector = agg.getLeafCollector(readerCtx.context, mock(LeafBucketCollector.class));
+        collector.collect(0, 0);
+
+        InternalAggregation[] results = agg.buildAggregations(new long[] { 0 });
+        InternalTimeSeries ts = (InternalTimeSeries) results[0];
+        assertEquals(1, ts.getTimeSeries().size());
+
+        SampleList samples = ts.getTimeSeries().get(0).getSamples();
+        assertEquals(3, samples.size());
+        assertEquals(1000L, samples.getTimestamp(0));
+        assertEquals(10.0, samples.getValue(0), 0.001);
+        assertEquals(2000L, samples.getTimestamp(1));
+        assertEquals(20.0, samples.getValue(1), 0.001);
+        assertEquals(3000L, samples.getTimestamp(2));
+        assertEquals(30.0, samples.getValue(2), 0.001);
+
+        readerCtx.directoryReader.close();
+        readerCtx.directory.close();
+        agg.close();
+    }
+
+    public void testNoTagMinAggregation() throws IOException {
+        long min = 1000L, max = 4000L, step = 1000L;
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.MIN, null, min, max, step);
+
+        // Two documents with overlapping timestamps — min aggregation across documents
+        TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L, 2000L } },
+            new double[][] { { 10.0, 20.0 } },
+            docId -> mock(Labels.class)
+        );
+
+        LeafBucketCollector collector = agg.getLeafCollector(readerCtx.context, mock(LeafBucketCollector.class));
+        collector.collect(0, 0);
+
+        // Second document with different values at same timestamps
+        TSDBLeafReaderWithContext readerCtx2 = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L, 2000L } },
+            new double[][] { { 15.0, 5.0 } },
+            docId -> mock(Labels.class)
+        );
+
+        LeafBucketCollector collector2 = agg.getLeafCollector(readerCtx2.context, mock(LeafBucketCollector.class));
+        collector2.collect(0, 0);
+
+        InternalAggregation[] results = agg.buildAggregations(new long[] { 0 });
+        InternalTimeSeries ts = (InternalTimeSeries) results[0];
+        assertEquals(1, ts.getTimeSeries().size());
+
+        SampleList samples = ts.getTimeSeries().get(0).getSamples();
+        assertEquals(2, samples.size());
+        assertEquals(1000L, samples.getTimestamp(0));
+        assertEquals(10.0, samples.getValue(0), 0.001); // min(10.0, 15.0)
+        assertEquals(2000L, samples.getTimestamp(1));
+        assertEquals(5.0, samples.getValue(1), 0.001); // min(20.0, 5.0)
+
+        readerCtx.directoryReader.close();
+        readerCtx.directory.close();
+        readerCtx2.directoryReader.close();
+        readerCtx2.directory.close();
+        agg.close();
+    }
+
+    public void testNoTagMaxAggregation() throws IOException {
+        long min = 1000L, max = 4000L, step = 1000L;
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.MAX, null, min, max, step);
+
+        // Two documents with overlapping timestamps — max aggregation across documents
+        TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L, 2000L } },
+            new double[][] { { 10.0, 20.0 } },
+            docId -> mock(Labels.class)
+        );
+
+        LeafBucketCollector collector = agg.getLeafCollector(readerCtx.context, mock(LeafBucketCollector.class));
+        collector.collect(0, 0);
+
+        TSDBLeafReaderWithContext readerCtx2 = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L, 2000L } },
+            new double[][] { { 15.0, 5.0 } },
+            docId -> mock(Labels.class)
+        );
+
+        LeafBucketCollector collector2 = agg.getLeafCollector(readerCtx2.context, mock(LeafBucketCollector.class));
+        collector2.collect(0, 0);
+
+        InternalAggregation[] results = agg.buildAggregations(new long[] { 0 });
+        InternalTimeSeries ts = (InternalTimeSeries) results[0];
+        assertEquals(1, ts.getTimeSeries().size());
+
+        SampleList samples = ts.getTimeSeries().get(0).getSamples();
+        assertEquals(2, samples.size());
+        assertEquals(1000L, samples.getTimestamp(0));
+        assertEquals(15.0, samples.getValue(0), 0.001); // max(10.0, 15.0)
+        assertEquals(2000L, samples.getTimestamp(1));
+        assertEquals(20.0, samples.getValue(1), 0.001); // max(20.0, 5.0)
+
+        readerCtx.directoryReader.close();
+        readerCtx.directory.close();
+        readerCtx2.directoryReader.close();
+        readerCtx2.directory.close();
+        agg.close();
+    }
+
+    public void testNoTagAvgAggregation() throws IOException {
+        long min = 1000L, max = 4000L, step = 1000L;
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.AVG, null, min, max, step);
+
+        // Two documents with overlapping timestamps to accumulate sum + count
+        TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L, 2000L } },
+            new double[][] { { 10.0, 20.0 } },
+            docId -> mock(Labels.class)
+        );
+
+        LeafBucketCollector collector = agg.getLeafCollector(readerCtx.context, mock(LeafBucketCollector.class));
+        collector.collect(0, 0);
+
+        TSDBLeafReaderWithContext readerCtx2 = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L, 2000L } },
+            new double[][] { { 30.0, 40.0 } },
+            docId -> mock(Labels.class)
+        );
+
+        LeafBucketCollector collector2 = agg.getLeafCollector(readerCtx2.context, mock(LeafBucketCollector.class));
+        collector2.collect(0, 0);
+
+        InternalAggregation[] results = agg.buildAggregations(new long[] { 0 });
+        InternalTimeSeries ts = (InternalTimeSeries) results[0];
+        assertEquals(1, ts.getTimeSeries().size());
+
+        // AVG path produces SumCountSamples — getValue() returns getAverage() (sum/count)
+        SampleList samples = ts.getTimeSeries().get(0).getSamples();
+        assertEquals(2, samples.size());
+        assertEquals(1000L, samples.getTimestamp(0));
+        assertEquals(20.0, samples.getValue(0), 0.001); // avg of 10,30 = 40/2
+        assertEquals(2000L, samples.getTimestamp(1));
+        assertEquals(30.0, samples.getValue(1), 0.001); // avg of 20,40 = 60/2
+
+        readerCtx.directoryReader.close();
+        readerCtx.directory.close();
+        readerCtx2.directoryReader.close();
+        readerCtx2.directory.close();
+        agg.close();
+    }
+
+    public void testNoTagSumMultipleDocuments() throws IOException {
+        long min = 1000L, max = 4000L, step = 1000L;
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.SUM, null, min, max, step);
+
+        TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L, 2000L } },
+            new double[][] { { 10.0, 20.0 } },
+            docId -> mock(Labels.class)
+        );
+
+        LeafBucketCollector collector = agg.getLeafCollector(readerCtx.context, mock(LeafBucketCollector.class));
+        // Collect two documents — each adds the same chunk data
+        collector.collect(0, 0);
+        collector.collect(0, 0);
+
+        InternalAggregation[] results = agg.buildAggregations(new long[] { 0 });
+        InternalTimeSeries ts = (InternalTimeSeries) results[0];
+        assertEquals(1, ts.getTimeSeries().size());
+
+        SampleList samples = ts.getTimeSeries().get(0).getSamples();
+        assertEquals(2, samples.size());
+        assertEquals(1000L, samples.getTimestamp(0));
+        assertEquals(20.0, samples.getValue(0), 0.001); // 10+10
+        assertEquals(2000L, samples.getTimestamp(1));
+        assertEquals(40.0, samples.getValue(1), 0.001); // 20+20
+
+        readerCtx.directoryReader.close();
+        readerCtx.directory.close();
+        agg.close();
+    }
+
+    public void testNoTagAggregationSkipsNaNSamples() throws IOException {
+        long min = 1000L, max = 5000L, step = 1000L;
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.SUM, null, min, max, step);
+
+        TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L, 2000L, 3000L } },
+            new double[][] { { 10.0, Double.NaN, 30.0 } },
+            docId -> mock(Labels.class)
+        );
+
+        LeafBucketCollector collector = agg.getLeafCollector(readerCtx.context, mock(LeafBucketCollector.class));
+        collector.collect(0, 0);
+
+        InternalAggregation[] results = agg.buildAggregations(new long[] { 0 });
+        InternalTimeSeries ts = (InternalTimeSeries) results[0];
+        assertEquals(1, ts.getTimeSeries().size());
+
+        // NaN sample at timestamp 2000 should be skipped
+        SampleList samples = ts.getTimeSeries().get(0).getSamples();
+        assertEquals(2, samples.size());
+        assertEquals(1000L, samples.getTimestamp(0));
+        assertEquals(10.0, samples.getValue(0), 0.001);
+        assertEquals(3000L, samples.getTimestamp(1));
+        assertEquals(30.0, samples.getValue(1), 0.001);
+
+        readerCtx.directoryReader.close();
+        readerCtx.directory.close();
+        agg.close();
+    }
+
+    public void testNoTagAggregationEmptyResult() throws IOException {
+        long min = 1000L, max = 4000L, step = 1000L;
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.SUM, null, min, max, step);
+
+        // Empty chunks — no data processed
+        TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] {},
+            new double[][] {},
+            docId -> mock(Labels.class)
+        );
+
+        LeafBucketCollector collector = agg.getLeafCollector(readerCtx.context, mock(LeafBucketCollector.class));
+        collector.collect(0, 0);
+
+        InternalAggregation[] results = agg.buildAggregations(new long[] { 0 });
+        InternalTimeSeries ts = (InternalTimeSeries) results[0];
+        // hasData=false → empty result list
+        assertTrue("Empty aggregation should have no time series", ts.getTimeSeries().isEmpty());
+
+        readerCtx.directoryReader.close();
+        readerCtx.directory.close();
+        agg.close();
+    }
+
+    // ---- LSI MemChunk inner chunk dedup tests ----
+    // LSI MemChunks have multiple inner chunks whose timestamps partially overlap.
+    // chunksForDoc returns these as separate ChunkIterators. The inplace aggregator
+    // must merge+dedup them (matching unfold aggregator behavior).
+
+    /**
+     * Simulate LSI MemChunk with partially overlapping inner chunks.
+     * Inner chunk 1: [1000, 2000, 3000], Inner chunk 2: [2000, 3000, 4000]
+     * After MergeIterator+DedupIterator(FIRST): [1000->10, 2000->20, 3000->30, 4000->70]
+     * (overlapping timestamps 2000 and 3000 keep first chunk's values)
+     */
+    public void testNoTagSumLSIPartialOverlap() throws IOException {
+        long min = 1000L, max = 5000L, step = 1000L;
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.SUM, null, min, max, step);
+
+        TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L, 2000L, 3000L }, { 2000L, 3000L, 4000L } },
+            new double[][] { { 10.0, 20.0, 30.0 }, { 55.0, 66.0, 70.0 } },
+            docId -> mock(Labels.class)
+        );
+
+        LeafBucketCollector collector = agg.getLeafCollector(readerCtx.context, mock(LeafBucketCollector.class));
+        collector.collect(0, 0);
+
+        InternalAggregation[] results = agg.buildAggregations(new long[] { 0 });
+        InternalTimeSeries ts = (InternalTimeSeries) results[0];
+        assertEquals(1, ts.getTimeSeries().size());
+
+        SampleList samples = ts.getTimeSeries().get(0).getSamples();
+        assertEquals(4, samples.size());
+        assertEquals(1000L, samples.getTimestamp(0));
+        assertEquals(10.0, samples.getValue(0), 0.001); // only in chunk 1
+        assertEquals(2000L, samples.getTimestamp(1));
+        assertEquals(20.0, samples.getValue(1), 0.001); // overlap: first chunk wins
+        assertEquals(3000L, samples.getTimestamp(2));
+        assertEquals(30.0, samples.getValue(2), 0.001); // overlap: first chunk wins
+        assertEquals(4000L, samples.getTimestamp(3));
+        assertEquals(70.0, samples.getValue(3), 0.001); // only in chunk 2
+
+        readerCtx.directoryReader.close();
+        readerCtx.directory.close();
+        agg.close();
+    }
+
+    /**
+     * Simulate LSI MemChunk dedup with SUM aggregation across two documents.
+     * Doc 1: inner chunks [1000->10, 2000->20] and [2000->99] (deduped to [1000->10, 2000->20])
+     * Doc 2: single chunk [1000->5, 2000->15] (no dedup needed)
+     * After SUM across docs: [1000->15, 2000->35]
+     */
+    public void testNoTagSumLSIDedupThenAggregateAcrossDocuments() throws IOException {
+        long min = 1000L, max = 4000L, step = 1000L;
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.SUM, null, min, max, step);
+
+        // Doc 1: two overlapping inner chunks (LSI MemChunk scenario)
+        TSDBLeafReaderWithContext readerCtx1 = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L, 2000L }, { 2000L } },
+            new double[][] { { 10.0, 20.0 }, { 99.0 } },
+            docId -> mock(Labels.class)
+        );
+
+        LeafBucketCollector collector1 = agg.getLeafCollector(readerCtx1.context, mock(LeafBucketCollector.class));
+        collector1.collect(0, 0);
+
+        // Doc 2: single chunk (no dedup needed)
+        TSDBLeafReaderWithContext readerCtx2 = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L, 2000L } },
+            new double[][] { { 5.0, 15.0 } },
+            docId -> mock(Labels.class)
+        );
+
+        LeafBucketCollector collector2 = agg.getLeafCollector(readerCtx2.context, mock(LeafBucketCollector.class));
+        collector2.collect(0, 0);
+
+        InternalAggregation[] results = agg.buildAggregations(new long[] { 0 });
+        InternalTimeSeries ts = (InternalTimeSeries) results[0];
+        assertEquals(1, ts.getTimeSeries().size());
+
+        SampleList samples = ts.getTimeSeries().get(0).getSamples();
+        assertEquals(2, samples.size());
+        assertEquals(1000L, samples.getTimestamp(0));
+        assertEquals(15.0, samples.getValue(0), 0.001); // 10 (deduped doc1) + 5 (doc2)
+        assertEquals(2000L, samples.getTimestamp(1));
+        assertEquals(35.0, samples.getValue(1), 0.001); // 20 (deduped doc1, not 99) + 15 (doc2)
+
+        readerCtx1.directoryReader.close();
+        readerCtx1.directory.close();
+        readerCtx2.directoryReader.close();
+        readerCtx2.directory.close();
+        agg.close();
+    }
+
+    /**
+     * Simulate LSI MemChunk dedup with tag-based aggregation.
+     * Verifies dedup happens per document before group aggregation.
+     */
+    public void testTagSumLSIDedupWithGrouping() throws IOException {
+        long min = 1000L, max = 4000L, step = 1000L;
+        List<String> groupByTags = List.of("region");
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.SUM, groupByTags, min, max, step);
+
+        Labels usLabels = mock(Labels.class);
+        when(usLabels.has("region")).thenReturn(true);
+        when(usLabels.get("region")).thenReturn("us");
+
+        // Doc with two overlapping inner chunks (LSI MemChunk)
+        TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L, 2000L }, { 1000L, 2000L } },
+            new double[][] { { 10.0, 20.0 }, { 99.0, 88.0 } },
+            docId -> usLabels
+        );
+
+        LeafBucketCollector collector = agg.getLeafCollector(readerCtx.context, mock(LeafBucketCollector.class));
+        collector.collect(0, 0);
+
+        InternalAggregation[] results = agg.buildAggregations(new long[] { 0 });
+        InternalTimeSeries ts = (InternalTimeSeries) results[0];
+        assertEquals(1, ts.getTimeSeries().size());
+
+        SampleList samples = ts.getTimeSeries().get(0).getSamples();
+        assertEquals(2, samples.size());
+        assertEquals(10.0, samples.getValue(0), 0.001); // deduped: first chunk only
+        assertEquals(20.0, samples.getValue(1), 0.001); // deduped: first chunk only
+
+        readerCtx.directoryReader.close();
+        readerCtx.directory.close();
+        agg.close();
+    }
+
+    /**
+     * Simulate LSI MemChunk with three inner chunks (progressive overlap).
+     * Chunk 1: [1000->1], Chunk 2: [1000->2, 2000->20], Chunk 3: [2000->3, 3000->30]
+     * MergeIterator produces sorted: [1000->1, 1000->2, 2000->20, 2000->3, 3000->30]
+     * DedupIterator(FIRST) keeps: [1000->1, 2000->20, 3000->30]
+     */
+    public void testNoTagSumLSIThreeInnerChunks() throws IOException {
+        long min = 1000L, max = 4000L, step = 1000L;
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.SUM, null, min, max, step);
+
+        TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L }, { 1000L, 2000L }, { 2000L, 3000L } },
+            new double[][] { { 1.0 }, { 2.0, 20.0 }, { 3.0, 30.0 } },
+            docId -> mock(Labels.class)
+        );
+
+        LeafBucketCollector collector = agg.getLeafCollector(readerCtx.context, mock(LeafBucketCollector.class));
+        collector.collect(0, 0);
+
+        InternalAggregation[] results = agg.buildAggregations(new long[] { 0 });
+        InternalTimeSeries ts = (InternalTimeSeries) results[0];
+        assertEquals(1, ts.getTimeSeries().size());
+
+        SampleList samples = ts.getTimeSeries().get(0).getSamples();
+        assertEquals(3, samples.size());
+        assertEquals(1000L, samples.getTimestamp(0));
+        assertEquals(1.0, samples.getValue(0), 0.001); // first chunk wins for t=1000
+        assertEquals(2000L, samples.getTimestamp(1));
+        assertEquals(20.0, samples.getValue(1), 0.001); // chunk 2 wins for t=2000 (appears before chunk 3)
+        assertEquals(3000L, samples.getTimestamp(2));
+        assertEquals(30.0, samples.getValue(2), 0.001); // only in chunk 3
+
+        readerCtx.directoryReader.close();
+        readerCtx.directory.close();
+        agg.close();
+    }
+
+    // ---- Tag-based aggregation data processing tests ----
+
+    /**
+     * Test that overlapping chunks within a single document are deduped (not double-counted).
+     * This simulates LSI MemChunks with overlapping inner chunks — the dedup iterator
+     * should keep only the first value for each timestamp.
+     */
+    public void testNoTagSumDedupOverlappingChunks() throws IOException {
+        long min = 1000L, max = 4000L, step = 1000L;
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.SUM, null, min, max, step);
+
+        // Two chunks with overlapping timestamps: both have t=1000 and t=2000
+        // Without dedup, SUM would double-count: 10+99=109 at t=1000, 20+88=108 at t=2000
+        // With dedup (FIRST policy), only first chunk's values are used: 10 at t=1000, 20 at t=2000
+        TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L, 2000L }, { 1000L, 2000L } },
+            new double[][] { { 10.0, 20.0 }, { 99.0, 88.0 } },
+            docId -> mock(Labels.class)
+        );
+
+        LeafBucketCollector collector = agg.getLeafCollector(readerCtx.context, mock(LeafBucketCollector.class));
+        collector.collect(0, 0);
+
+        InternalAggregation[] results = agg.buildAggregations(new long[] { 0 });
+        InternalTimeSeries ts = (InternalTimeSeries) results[0];
+        assertEquals(1, ts.getTimeSeries().size());
+
+        SampleList samples = ts.getTimeSeries().get(0).getSamples();
+        assertEquals(2, samples.size());
+        assertEquals(1000L, samples.getTimestamp(0));
+        assertEquals(10.0, samples.getValue(0), 0.001); // deduped: first chunk value only
+        assertEquals(2000L, samples.getTimestamp(1));
+        assertEquals(20.0, samples.getValue(1), 0.001); // deduped: first chunk value only
+
+        readerCtx.directoryReader.close();
+        readerCtx.directory.close();
+        agg.close();
+    }
+
+    /**
+     * Test that a single chunk does not get wrapped with DedupIterator (matching unfold behavior).
+     * Single chunks are passed through directly.
+     */
+    public void testNoTagSumSingleChunkNoDedup() throws IOException {
+        long min = 1000L, max = 4000L, step = 1000L;
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.SUM, null, min, max, step);
+
+        // Single chunk — mergeAndDedup should return it directly
+        TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L, 2000L, 3000L } },
+            new double[][] { { 10.0, 20.0, 30.0 } },
+            docId -> mock(Labels.class)
+        );
+
+        LeafBucketCollector collector = agg.getLeafCollector(readerCtx.context, mock(LeafBucketCollector.class));
+        collector.collect(0, 0);
+
+        InternalAggregation[] results = agg.buildAggregations(new long[] { 0 });
+        InternalTimeSeries ts = (InternalTimeSeries) results[0];
+        assertEquals(1, ts.getTimeSeries().size());
+
+        SampleList samples = ts.getTimeSeries().get(0).getSamples();
+        assertEquals(3, samples.size());
+        assertEquals(10.0, samples.getValue(0), 0.001);
+        assertEquals(20.0, samples.getValue(1), 0.001);
+        assertEquals(30.0, samples.getValue(2), 0.001);
+
+        readerCtx.directoryReader.close();
+        readerCtx.directory.close();
+        agg.close();
+    }
+
+    /**
+     * Test dedup with tag-based aggregation — overlapping chunks should be deduped per document.
+     */
+    public void testTagSumDedupOverlappingChunks() throws IOException {
+        long min = 1000L, max = 4000L, step = 1000L;
+        List<String> groupByTags = List.of("region");
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.SUM, groupByTags, min, max, step);
+
+        Labels mockLabels = mock(Labels.class);
+        when(mockLabels.has("region")).thenReturn(true);
+        when(mockLabels.get("region")).thenReturn("us");
+
+        // Two overlapping chunks — dedup should keep only first values
+        TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L, 2000L }, { 1000L, 2000L } },
+            new double[][] { { 10.0, 20.0 }, { 99.0, 88.0 } },
+            docId -> mockLabels
+        );
+
+        LeafBucketCollector collector = agg.getLeafCollector(readerCtx.context, mock(LeafBucketCollector.class));
+        collector.collect(0, 0);
+
+        InternalAggregation[] results = agg.buildAggregations(new long[] { 0 });
+        InternalTimeSeries ts = (InternalTimeSeries) results[0];
+        assertEquals(1, ts.getTimeSeries().size());
+
+        SampleList samples = ts.getTimeSeries().get(0).getSamples();
+        assertEquals(2, samples.size());
+        assertEquals(10.0, samples.getValue(0), 0.001); // deduped: first chunk value
+        assertEquals(20.0, samples.getValue(1), 0.001); // deduped: first chunk value
+
+        readerCtx.directoryReader.close();
+        readerCtx.directory.close();
+        agg.close();
+    }
+
+    public void testTagSumAggregation() throws IOException {
+        long min = 1000L, max = 4000L, step = 1000L;
+        List<String> groupByTags = List.of("region");
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.SUM, groupByTags, min, max, step);
+
+        Labels mockLabels = mock(Labels.class);
+        when(mockLabels.has("region")).thenReturn(true);
+        when(mockLabels.get("region")).thenReturn("us");
+
+        TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L, 2000L } },
+            new double[][] { { 10.0, 20.0 } },
+            docId -> mockLabels
+        );
+
+        LeafBucketCollector collector = agg.getLeafCollector(readerCtx.context, mock(LeafBucketCollector.class));
+        collector.collect(0, 0);
+
+        InternalAggregation[] results = agg.buildAggregations(new long[] { 0 });
+        InternalTimeSeries ts = (InternalTimeSeries) results[0];
+        assertEquals(1, ts.getTimeSeries().size());
+
+        SampleList samples = ts.getTimeSeries().get(0).getSamples();
+        assertEquals(2, samples.size());
+        assertEquals(1000L, samples.getTimestamp(0));
+        assertEquals(10.0, samples.getValue(0), 0.001);
+        assertEquals(2000L, samples.getTimestamp(1));
+        assertEquals(20.0, samples.getValue(1), 0.001);
+
+        readerCtx.directoryReader.close();
+        readerCtx.directory.close();
+        agg.close();
+    }
+
+    public void testTagAvgAggregation() throws IOException {
+        long min = 1000L, max = 4000L, step = 1000L;
+        List<String> groupByTags = List.of("region");
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.AVG, groupByTags, min, max, step);
+
+        Labels mockLabels = mock(Labels.class);
+        when(mockLabels.has("region")).thenReturn(true);
+        when(mockLabels.get("region")).thenReturn("us");
+
+        // First document
+        TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L } },
+            new double[][] { { 10.0 } },
+            docId -> mockLabels
+        );
+
+        LeafBucketCollector collector = agg.getLeafCollector(readerCtx.context, mock(LeafBucketCollector.class));
+        collector.collect(0, 0);
+
+        // Second document with same timestamp
+        TSDBLeafReaderWithContext readerCtx2 = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L } },
+            new double[][] { { 30.0 } },
+            docId -> mockLabels
+        );
+
+        LeafBucketCollector collector2 = agg.getLeafCollector(readerCtx2.context, mock(LeafBucketCollector.class));
+        collector2.collect(0, 0);
+
+        InternalAggregation[] results = agg.buildAggregations(new long[] { 0 });
+        InternalTimeSeries ts = (InternalTimeSeries) results[0];
+        assertEquals(1, ts.getTimeSeries().size());
+
+        // AVG path: getValue returns getAverage() (sum/count)
+        SampleList samples = ts.getTimeSeries().get(0).getSamples();
+        assertEquals(1, samples.size());
+        assertEquals(1000L, samples.getTimestamp(0));
+        assertEquals(20.0, samples.getValue(0), 0.001); // avg of 10,30 = 40/2
+
+        readerCtx.directoryReader.close();
+        readerCtx.directory.close();
+        readerCtx2.directoryReader.close();
+        readerCtx2.directory.close();
+        agg.close();
+    }
+
+    public void testTagAggregationMissingGroupByTag() throws IOException {
+        long min = 1000L, max = 4000L, step = 1000L;
+        List<String> groupByTags = List.of("region");
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.SUM, groupByTags, min, max, step);
+
+        // Labels missing the required "region" tag
+        Labels mockLabels = mock(Labels.class);
+        when(mockLabels.has("region")).thenReturn(false);
+
+        TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L, 2000L } },
+            new double[][] { { 10.0, 20.0 } },
+            docId -> mockLabels
+        );
+
+        LeafBucketCollector collector = agg.getLeafCollector(readerCtx.context, mock(LeafBucketCollector.class));
+        collector.collect(0, 0);
+
+        InternalAggregation[] results = agg.buildAggregations(new long[] { 0 });
+        InternalTimeSeries ts = (InternalTimeSeries) results[0];
+        // Document skipped due to missing group-by tag → no results
+        assertTrue("Missing group-by tag should produce no results", ts.getTimeSeries().isEmpty());
+
+        readerCtx.directoryReader.close();
+        readerCtx.directory.close();
+        agg.close();
+    }
+
+    public void testTagAggregationEmptyGroupByTags() throws IOException {
+        long min = 1000L, max = 4000L, step = 1000L;
+        // Empty groupByTags list → extractGroupLabels returns ByteLabels.emptyLabels()
+        List<String> groupByTags = List.of();
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.SUM, groupByTags, min, max, step);
+
+        // Note: with empty groupByTags, createInplaceState() creates NoTagInplaceState
+        // (groupByTags.isEmpty() check in createInplaceState)
+        TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L, 2000L } },
+            new double[][] { { 10.0, 20.0 } },
+            docId -> mock(Labels.class)
+        );
+
+        LeafBucketCollector collector = agg.getLeafCollector(readerCtx.context, mock(LeafBucketCollector.class));
+        collector.collect(0, 0);
+
+        InternalAggregation[] results = agg.buildAggregations(new long[] { 0 });
+        InternalTimeSeries ts = (InternalTimeSeries) results[0];
+        assertEquals(1, ts.getTimeSeries().size());
+
+        SampleList samples = ts.getTimeSeries().get(0).getSamples();
+        assertEquals(2, samples.size());
+
+        readerCtx.directoryReader.close();
+        readerCtx.directory.close();
+        agg.close();
+    }
+
+    public void testTagAggregationMultipleGroups() throws IOException {
+        long min = 1000L, max = 4000L, step = 1000L;
+        List<String> groupByTags = List.of("region");
+        TimeSeriesInplaceAggregator agg = createInplaceAggregator(InplaceAggregationType.SUM, groupByTags, min, max, step);
+
+        // Two different label sets for two different groups
+        Labels usLabels = mock(Labels.class);
+        when(usLabels.has("region")).thenReturn(true);
+        when(usLabels.get("region")).thenReturn("us");
+
+        Labels euLabels = mock(Labels.class);
+        when(euLabels.has("region")).thenReturn(true);
+        when(euLabels.get("region")).thenReturn("eu");
+
+        // First leaf reader for "us" group
+        TSDBLeafReaderWithContext readerCtx1 = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L, 2000L } },
+            new double[][] { { 10.0, 20.0 } },
+            docId -> usLabels
+        );
+        LeafBucketCollector collector1 = agg.getLeafCollector(readerCtx1.context, mock(LeafBucketCollector.class));
+        collector1.collect(0, 0);
+
+        // Second leaf reader for "eu" group
+        TSDBLeafReaderWithContext readerCtx2 = createMockTSDBLeafReaderWithContext(
+            min,
+            max,
+            new long[][] { { 1000L, 2000L } },
+            new double[][] { { 30.0, 40.0 } },
+            docId -> euLabels
+        );
+        LeafBucketCollector collector2 = agg.getLeafCollector(readerCtx2.context, mock(LeafBucketCollector.class));
+        collector2.collect(0, 0);
+
+        InternalAggregation[] results = agg.buildAggregations(new long[] { 0 });
+        InternalTimeSeries ts = (InternalTimeSeries) results[0];
+        assertEquals("Should have 2 groups", 2, ts.getTimeSeries().size());
+
+        // Verify each group has 2 samples
+        for (TimeSeries series : ts.getTimeSeries()) {
+            assertEquals(2, series.getSamples().size());
+        }
+
+        readerCtx1.directoryReader.close();
+        readerCtx1.directory.close();
+        readerCtx2.directoryReader.close();
+        readerCtx2.directory.close();
+        agg.close();
+    }
+
+    // ---- Circuit breaker tests ----
+
+    public void testCircuitBreakerTrips() throws IOException {
+        ArmedCircuitBreaker armedBreaker = new ArmedCircuitBreaker("request");
+        CircuitBreakerService circuitBreakerService = mock(CircuitBreakerService.class);
+        when(circuitBreakerService.getBreaker(anyString())).thenReturn(armedBreaker);
+
+        SearchContext mockSearchContext = mock(SearchContext.class);
+        QueryShardContext mockQueryShardContext = mock(QueryShardContext.class);
+        BigArrays bigArrays = new BigArrays(null, circuitBreakerService, "request");
+        when(mockSearchContext.getQueryShardContext()).thenReturn(mockQueryShardContext);
+        when(mockSearchContext.bigArrays()).thenReturn(bigArrays);
+
+        TimeSeriesInplaceAggregator agg = new TimeSeriesInplaceAggregator(
+            "test_cb",
+            AggregatorFactories.EMPTY,
+            InplaceAggregationType.SUM,
+            null,
+            mockSearchContext,
+            null,
+            CardinalityUpperBound.NONE,
+            1000L,
+            4000L,
+            1000L,
+            Map.of()
+        );
+
+        TSDBLeafReaderWithContext readerCtx = createMockTSDBLeafReaderWithContext(
+            1000L,
+            4000L,
+            new long[][] { { 1000L, 2000L } },
+            new double[][] { { 10.0, 20.0 } },
+            docId -> mock(Labels.class)
+        );
+
+        LeafBucketCollector collector = agg.getLeafCollector(readerCtx.context, mock(LeafBucketCollector.class));
+
+        // Collect a document — bytes are batched, not yet committed to the breaker
+        collector.collect(0, 0);
+
+        // Arm the breaker after collection so the flush in buildAggregations trips it
+        armedBreaker.arm();
+
+        // buildAggregations flushes the batcher, which commits to the armed breaker and trips
+        expectThrows(CircuitBreakingException.class, () -> agg.buildAggregations(new long[] { 0 }));
+
+        readerCtx.directoryReader.close();
+        readerCtx.directory.close();
+        agg.close();
+    }
+
+    // ---- InplaceAggregationType tests ----
+
+    public void testGetDisplayName() {
+        assertEquals("sum", InplaceAggregationType.SUM.getDisplayName());
+        assertEquals("min", InplaceAggregationType.MIN.getDisplayName());
+        assertEquals("max", InplaceAggregationType.MAX.getDisplayName());
+        assertEquals("avg", InplaceAggregationType.AVG.getDisplayName());
+    }
+
+    // ---- Factory createInternal test ----
+
+    public void testFactoryCreateInternal() throws IOException {
+        TimeSeriesInplaceAggregatorFactory factory = createFactory(InplaceAggregationType.SUM, null, 1000L, 5000L, 100L);
+
+        SearchContext mockSearchContext = mock(SearchContext.class);
+        QueryShardContext mockQueryShardContext = mock(QueryShardContext.class);
+        CircuitBreakerService cbs = new NoneCircuitBreakerService();
+        BigArrays bigArrays = new BigArrays(null, cbs, "request");
+        when(mockSearchContext.getQueryShardContext()).thenReturn(mockQueryShardContext);
+        when(mockSearchContext.bigArrays()).thenReturn(bigArrays);
+
+        Aggregator aggregator = factory.createInternal(mockSearchContext, null, CardinalityUpperBound.NONE, Map.of());
+        assertNotNull(aggregator);
+        assertTrue("Should create TimeSeriesInplaceAggregator", aggregator instanceof TimeSeriesInplaceAggregator);
+        aggregator.close();
+    }
+
+    // ---- Helper methods ----
+
+    private TimeSeriesInplaceAggregator createInplaceAggregator(
+        InplaceAggregationType type,
+        List<String> groupByTags,
+        long min,
+        long max,
+        long step
+    ) throws IOException {
+        SearchContext mockSearchContext = mock(SearchContext.class);
+        QueryShardContext mockQueryShardContext = mock(QueryShardContext.class);
+
+        CircuitBreakerService circuitBreakerService = new NoneCircuitBreakerService();
+        BigArrays bigArrays = new BigArrays(null, circuitBreakerService, "request");
+
+        when(mockSearchContext.getQueryShardContext()).thenReturn(mockQueryShardContext);
+        when(mockSearchContext.bigArrays()).thenReturn(bigArrays);
+
+        return new TimeSeriesInplaceAggregator(
+            "test_inplace_agg",
+            AggregatorFactories.EMPTY,
+            type,
+            groupByTags,
+            mockSearchContext,
+            null,
+            CardinalityUpperBound.NONE,
+            min,
+            max,
+            step,
+            Map.of()
+        );
+    }
+
+    private TimeSeriesInplaceAggregatorFactory createFactory(
+        InplaceAggregationType type,
+        List<String> groupByTags,
+        long min,
+        long max,
+        long step
+    ) throws IOException {
+        QueryShardContext mockQueryShardContext = mock(QueryShardContext.class);
+
+        return new TimeSeriesInplaceAggregatorFactory(
+            "test_factory",
+            mockQueryShardContext,
+            null,
+            new AggregatorFactories.Builder(),
+            Map.of(),
+            type,
+            groupByTags,
+            min,
+            max,
+            step
+        );
+    }
+
+    // ---- TSDBLeafReader mock infrastructure (reused from TimeSeriesUnfoldAggregatorTests) ----
+
+    private static class TSDBLeafReaderWithContext {
+        final TSDBLeafReader reader;
+        final LeafReaderContext context;
+        final DirectoryReader directoryReader;
+        final Directory directory;
+        final IndexWriter indexWriter;
+
+        TSDBLeafReaderWithContext(
+            TSDBLeafReader reader,
+            LeafReaderContext context,
+            DirectoryReader directoryReader,
+            Directory directory,
+            IndexWriter indexWriter
+        ) {
+            this.reader = reader;
+            this.context = context;
+            this.directoryReader = directoryReader;
+            this.directory = directory;
+            this.indexWriter = indexWriter;
+        }
+    }
+
+    private TSDBLeafReaderWithContext createMockTSDBLeafReaderWithContext(long minTimestamp, long maxTimestamp) throws IOException {
+        Directory directory = new ByteBuffersDirectory();
+        IndexWriter indexWriter = new IndexWriter(directory, new IndexWriterConfig());
+        indexWriter.addDocument(new Document());
+        indexWriter.commit();
+
+        DirectoryReader tempReader = DirectoryReader.open(indexWriter);
+        LeafReader baseReader = tempReader.leaves().get(0).reader();
+
+        TSDBLeafReader tsdbLeafReader = new TSDBLeafReader(baseReader, minTimestamp, maxTimestamp) {
+            @Override
+            public CacheHelper getReaderCacheHelper() {
+                return null;
+            }
+
+            @Override
+            public CacheHelper getCoreCacheHelper() {
+                return null;
+            }
+
+            @Override
+            protected StoredFieldsReader doGetSequentialStoredFieldsReader(StoredFieldsReader reader) {
+                return reader;
+            }
+
+            @Override
+            public TSDBDocValues getTSDBDocValues() throws IOException {
+                return mock(TSDBDocValues.class);
+            }
+
+            @Override
+            public List<ChunkIterator> chunksForDoc(int docId, TSDBDocValues tsdbDocValues) throws IOException {
+                return List.of();
+            }
+
+            @Override
+            public Labels labelsForDoc(int docId, TSDBDocValues tsdbDocValues) throws IOException {
+                return mock(Labels.class);
+            }
+        };
+
+        CompositeReader compositeReader = new CompositeReader() {
+            @Override
+            protected List<? extends LeafReader> getSequentialSubReaders() {
+                return Collections.singletonList(tsdbLeafReader);
+            }
+
+            @Override
+            public TermVectors termVectors() throws IOException {
+                return tsdbLeafReader.termVectors();
+            }
+
+            @Override
+            public int numDocs() {
+                return tsdbLeafReader.numDocs();
+            }
+
+            @Override
+            public int maxDoc() {
+                return tsdbLeafReader.maxDoc();
+            }
+
+            @Override
+            public StoredFields storedFields() throws IOException {
+                return tsdbLeafReader.storedFields();
+            }
+
+            @Override
+            protected void doClose() throws IOException {}
+
+            @Override
+            public CacheHelper getReaderCacheHelper() {
+                return null;
+            }
+
+            @Override
+            public int docFreq(Term term) throws IOException {
+                return tsdbLeafReader.docFreq(term);
+            }
+
+            @Override
+            public long totalTermFreq(Term term) throws IOException {
+                return tsdbLeafReader.totalTermFreq(term);
+            }
+
+            @Override
+            public long getSumDocFreq(String field) throws IOException {
+                return tsdbLeafReader.getSumDocFreq(field);
+            }
+
+            @Override
+            public int getDocCount(String field) throws IOException {
+                return tsdbLeafReader.getDocCount(field);
+            }
+
+            @Override
+            public long getSumTotalTermFreq(String field) throws IOException {
+                return tsdbLeafReader.getSumTotalTermFreq(field);
+            }
+        };
+
+        LeafReaderContext context = compositeReader.leaves().getFirst();
+        return new TSDBLeafReaderWithContext(tsdbLeafReader, context, tempReader, directory, indexWriter);
+    }
+
+    /**
+     * Overloaded helper: creates a TSDBLeafReaderWithContext that returns provided chunk data and labels.
+     * Each call to chunksForDoc creates fresh TestChunkIterator instances.
+     */
+    private TSDBLeafReaderWithContext createMockTSDBLeafReaderWithContext(
+        long minTimestamp,
+        long maxTimestamp,
+        long[][] chunkTimestamps,
+        double[][] chunkValues,
+        IntFunction<Labels> labelProvider
+    ) throws IOException {
+        Directory directory = new ByteBuffersDirectory();
+        IndexWriter indexWriter = new IndexWriter(directory, new IndexWriterConfig());
+        indexWriter.addDocument(new Document());
+        indexWriter.commit();
+
+        DirectoryReader tempReader = DirectoryReader.open(indexWriter);
+        LeafReader baseReader = tempReader.leaves().get(0).reader();
+
+        TSDBLeafReader tsdbLeafReader = new TSDBLeafReader(baseReader, minTimestamp, maxTimestamp) {
+            @Override
+            public CacheHelper getReaderCacheHelper() {
+                return null;
+            }
+
+            @Override
+            public CacheHelper getCoreCacheHelper() {
+                return null;
+            }
+
+            @Override
+            protected StoredFieldsReader doGetSequentialStoredFieldsReader(StoredFieldsReader reader) {
+                return reader;
+            }
+
+            @Override
+            public TSDBDocValues getTSDBDocValues() throws IOException {
+                return mock(TSDBDocValues.class);
+            }
+
+            @Override
+            public List<ChunkIterator> chunksForDoc(int docId, TSDBDocValues tsdbDocValues) throws IOException {
+                // Create fresh TestChunkIterator instances for each call
+                List<ChunkIterator> chunks = new ArrayList<>();
+                for (int i = 0; i < chunkTimestamps.length; i++) {
+                    chunks.add(new TestChunkIterator(chunkTimestamps[i], chunkValues[i]));
+                }
+                return chunks;
+            }
+
+            @Override
+            public Labels labelsForDoc(int docId, TSDBDocValues tsdbDocValues) throws IOException {
+                return labelProvider.apply(docId);
+            }
+        };
+
+        CompositeReader compositeReader = new CompositeReader() {
+            @Override
+            protected List<? extends LeafReader> getSequentialSubReaders() {
+                return Collections.singletonList(tsdbLeafReader);
+            }
+
+            @Override
+            public TermVectors termVectors() throws IOException {
+                return tsdbLeafReader.termVectors();
+            }
+
+            @Override
+            public int numDocs() {
+                return tsdbLeafReader.numDocs();
+            }
+
+            @Override
+            public int maxDoc() {
+                return tsdbLeafReader.maxDoc();
+            }
+
+            @Override
+            public StoredFields storedFields() throws IOException {
+                return tsdbLeafReader.storedFields();
+            }
+
+            @Override
+            protected void doClose() throws IOException {}
+
+            @Override
+            public CacheHelper getReaderCacheHelper() {
+                return null;
+            }
+
+            @Override
+            public int docFreq(Term term) throws IOException {
+                return tsdbLeafReader.docFreq(term);
+            }
+
+            @Override
+            public long totalTermFreq(Term term) throws IOException {
+                return tsdbLeafReader.totalTermFreq(term);
+            }
+
+            @Override
+            public long getSumDocFreq(String field) throws IOException {
+                return tsdbLeafReader.getSumDocFreq(field);
+            }
+
+            @Override
+            public int getDocCount(String field) throws IOException {
+                return tsdbLeafReader.getDocCount(field);
+            }
+
+            @Override
+            public long getSumTotalTermFreq(String field) throws IOException {
+                return tsdbLeafReader.getSumTotalTermFreq(field);
+            }
+        };
+
+        LeafReaderContext context = compositeReader.leaves().getFirst();
+        return new TSDBLeafReaderWithContext(tsdbLeafReader, context, tempReader, directory, indexWriter);
+    }
+
+    /**
+     * Simple ChunkIterator that yields predetermined samples from arrays.
+     * The default decodeSamples() method works automatically via next()/at().
+     */
+    private static class TestChunkIterator implements ChunkIterator {
+        private final long[] timestamps;
+        private final double[] values;
+        private int index = -1;
+
+        TestChunkIterator(long[] timestamps, double[] values) {
+            this.timestamps = timestamps;
+            this.values = values;
+        }
+
+        @Override
+        public ValueType next() {
+            index++;
+            return index < timestamps.length ? ValueType.FLOAT : ValueType.NONE;
+        }
+
+        @Override
+        public TimestampValue at() {
+            return new TimestampValue(timestamps[index], values[index]);
+        }
+
+        @Override
+        public Exception error() {
+            return null;
+        }
+
+        @Override
+        public int totalSamples() {
+            return timestamps.length;
+        }
+    }
+
+    /**
+     * Circuit breaker that can be armed after construction to test breaker trips.
+     */
+    private static class ArmedCircuitBreaker extends NoopCircuitBreaker {
+        private boolean armed = false;
+
+        ArmedCircuitBreaker(String name) {
+            super(name);
+        }
+
+        void arm() {
+            armed = true;
+        }
+
+        @Override
+        public double addEstimateBytesAndMaybeBreak(long bytes, String label) throws CircuitBreakingException {
+            if (armed) {
+                throw new CircuitBreakingException("Test circuit breaker tripped", bytes, 1000L, Durability.TRANSIENT);
+            }
+            return bytes;
+        }
+    }
+}

@@ -2142,4 +2142,237 @@ public class RestM3QLActionTests extends OpenSearchTestCase {
         setupMockClusterServiceWithStepSize(Map.of(indexName, stepSize));
     }
 
+    // ========== include_exec_stats Parameter Tests ==========
+
+    /**
+     * Test that when no include_exec_stats param is provided (default), the PromMatrixResponseListener
+     * is constructed with includeExecStats=true (the default).
+     */
+    public void testIncludeExecStatsDefaultIsFalse() throws Exception {
+        CountDownLatch assertionLatch = new CountDownLatch(1);
+        NodeClient captureClient = mock(NodeClient.class);
+        doAnswer(invocation -> {
+            ActionListener<SearchResponse> listener = invocation.getArgument(1);
+            try {
+                // Verify the listener is a PromMatrixResponseListener with includeExecStats=true
+                assertNotNull("Listener should not be null", listener);
+                assertThat(
+                    "Listener should be a PromMatrixResponseListener",
+                    listener,
+                    org.hamcrest.Matchers.instanceOf(PromMatrixResponseListener.class)
+                );
+                PromMatrixResponseListener pmrl = (PromMatrixResponseListener) listener;
+                assertFalse("includeExecStats should default to false", pmrl.isIncludeExecStats());
+            } finally {
+                assertionLatch.countDown();
+            }
+            SearchResponse mockResponse = mock(SearchResponse.class);
+            listener.onResponse(mockResponse);
+            return null;
+        }).when(captureClient).search(any(SearchRequest.class), any());
+
+        FakeRestRequest request = new FakeRestRequest.Builder(xContentRegistry()).withMethod(RestRequest.Method.GET)
+            .withPath("/_m3ql")
+            .withParams(Map.of("query", "fetch service:api", "step", "10000"))
+            .build();
+        FakeRestChannel channel = new FakeRestChannel(request, true, 1);
+
+        action.handleRequest(request, channel, captureClient);
+
+        assertTrue("Assertion should complete within timeout", assertionLatch.await(5, TimeUnit.SECONDS));
+        assertThat(channel.capturedResponse().status(), equalTo(RestStatus.OK));
+    }
+
+    /**
+     * Test that when include_exec_stats=true is passed, the PromMatrixResponseListener
+     * is constructed with includeExecStats=true.
+     */
+    public void testIncludeExecStatsTrueIsThreadedToListener() throws Exception {
+        CountDownLatch assertionLatch = new CountDownLatch(1);
+        NodeClient captureClient = mock(NodeClient.class);
+        doAnswer(invocation -> {
+            ActionListener<SearchResponse> listener = invocation.getArgument(1);
+            try {
+                assertNotNull("Listener should not be null", listener);
+                assertThat(
+                    "Listener should be a PromMatrixResponseListener",
+                    listener,
+                    org.hamcrest.Matchers.instanceOf(PromMatrixResponseListener.class)
+                );
+                PromMatrixResponseListener pmrl = (PromMatrixResponseListener) listener;
+                assertTrue("includeExecStats should be true when param is set", pmrl.isIncludeExecStats());
+            } finally {
+                assertionLatch.countDown();
+            }
+            SearchResponse mockResponse = mock(SearchResponse.class);
+            listener.onResponse(mockResponse);
+            return null;
+        }).when(captureClient).search(any(SearchRequest.class), any());
+
+        FakeRestRequest request = new FakeRestRequest.Builder(xContentRegistry()).withMethod(RestRequest.Method.GET)
+            .withPath("/_m3ql")
+            .withParams(Map.of("query", "fetch service:api", "step", "10000", "include_exec_stats", "true"))
+            .build();
+        FakeRestChannel channel = new FakeRestChannel(request, true, 1);
+
+        action.handleRequest(request, channel, captureClient);
+
+        assertTrue("Assertion should complete within timeout", assertionLatch.await(5, TimeUnit.SECONDS));
+        assertThat(channel.capturedResponse().status(), equalTo(RestStatus.OK));
+    }
+
+    /**
+     * Test that when include_exec_stats=false is passed, the PromMatrixResponseListener
+     * is constructed with includeExecStats=false.
+     */
+    public void testIncludeExecStatsFalseIsThreadedToListener() throws Exception {
+        CountDownLatch assertionLatch = new CountDownLatch(1);
+        NodeClient captureClient = mock(NodeClient.class);
+        doAnswer(invocation -> {
+            ActionListener<SearchResponse> listener = invocation.getArgument(1);
+            try {
+                assertNotNull("Listener should not be null", listener);
+                assertThat(
+                    "Listener should be a PromMatrixResponseListener",
+                    listener,
+                    org.hamcrest.Matchers.instanceOf(PromMatrixResponseListener.class)
+                );
+                PromMatrixResponseListener pmrl = (PromMatrixResponseListener) listener;
+                assertFalse("includeExecStats should be false when param is false", pmrl.isIncludeExecStats());
+            } finally {
+                assertionLatch.countDown();
+            }
+            SearchResponse mockResponse = mock(SearchResponse.class);
+            listener.onResponse(mockResponse);
+            return null;
+        }).when(captureClient).search(any(SearchRequest.class), any());
+
+        FakeRestRequest request = new FakeRestRequest.Builder(xContentRegistry()).withMethod(RestRequest.Method.GET)
+            .withPath("/_m3ql")
+            .withParams(Map.of("query", "fetch service:api", "step", "10000", "include_exec_stats", "false"))
+            .build();
+        FakeRestChannel channel = new FakeRestChannel(request, true, 1);
+
+        action.handleRequest(request, channel, captureClient);
+
+        assertTrue("Assertion should complete within timeout", assertionLatch.await(5, TimeUnit.SECONDS));
+        assertThat(channel.capturedResponse().status(), equalTo(RestStatus.OK));
+    }
+
+    // ========== include_data_source Parameter Tests ==========
+
+    /**
+     * Test that when no include_data_source param is provided (default), the PromMatrixResponseListener
+     * is constructed with includeDataSource=false.
+     */
+    public void testIncludeDataSourceDefaultIsFalse() throws Exception {
+        CountDownLatch assertionLatch = new CountDownLatch(1);
+        NodeClient captureClient = mock(NodeClient.class);
+        doAnswer(invocation -> {
+            ActionListener<SearchResponse> listener = invocation.getArgument(1);
+            try {
+                assertNotNull("Listener should not be null", listener);
+                assertThat(
+                    "Listener should be a PromMatrixResponseListener",
+                    listener,
+                    org.hamcrest.Matchers.instanceOf(PromMatrixResponseListener.class)
+                );
+                PromMatrixResponseListener pmrl = (PromMatrixResponseListener) listener;
+                assertFalse("includeDataSource should default to false", pmrl.isIncludeDataSource());
+            } finally {
+                assertionLatch.countDown();
+            }
+            SearchResponse mockResponse = mock(SearchResponse.class);
+            listener.onResponse(mockResponse);
+            return null;
+        }).when(captureClient).search(any(SearchRequest.class), any());
+
+        FakeRestRequest request = new FakeRestRequest.Builder(xContentRegistry()).withMethod(RestRequest.Method.GET)
+            .withPath("/_m3ql")
+            .withParams(Map.of("query", "fetch service:api", "step", "10000"))
+            .build();
+        FakeRestChannel channel = new FakeRestChannel(request, true, 1);
+
+        action.handleRequest(request, channel, captureClient);
+
+        assertTrue("Assertion should complete within timeout", assertionLatch.await(5, TimeUnit.SECONDS));
+        assertThat(channel.capturedResponse().status(), equalTo(RestStatus.OK));
+    }
+
+    /**
+     * Test that when include_data_source=true is passed, the PromMatrixResponseListener
+     * is constructed with includeDataSource=true.
+     */
+    public void testIncludeDataSourceTrueIsThreadedToListener() throws Exception {
+        CountDownLatch assertionLatch = new CountDownLatch(1);
+        NodeClient captureClient = mock(NodeClient.class);
+        doAnswer(invocation -> {
+            ActionListener<SearchResponse> listener = invocation.getArgument(1);
+            try {
+                assertNotNull("Listener should not be null", listener);
+                assertThat(
+                    "Listener should be a PromMatrixResponseListener",
+                    listener,
+                    org.hamcrest.Matchers.instanceOf(PromMatrixResponseListener.class)
+                );
+                PromMatrixResponseListener pmrl = (PromMatrixResponseListener) listener;
+                assertTrue("includeDataSource should be true when param is set", pmrl.isIncludeDataSource());
+            } finally {
+                assertionLatch.countDown();
+            }
+            SearchResponse mockResponse = mock(SearchResponse.class);
+            listener.onResponse(mockResponse);
+            return null;
+        }).when(captureClient).search(any(SearchRequest.class), any());
+
+        FakeRestRequest request = new FakeRestRequest.Builder(xContentRegistry()).withMethod(RestRequest.Method.GET)
+            .withPath("/_m3ql")
+            .withParams(Map.of("query", "fetch service:api", "step", "10000", "include_data_source", "true"))
+            .build();
+        FakeRestChannel channel = new FakeRestChannel(request, true, 1);
+
+        action.handleRequest(request, channel, captureClient);
+
+        assertTrue("Assertion should complete within timeout", assertionLatch.await(5, TimeUnit.SECONDS));
+        assertThat(channel.capturedResponse().status(), equalTo(RestStatus.OK));
+    }
+
+    /**
+     * Test that when include_data_source=false is passed, the PromMatrixResponseListener
+     * is constructed with includeDataSource=false.
+     */
+    public void testIncludeDataSourceFalseIsThreadedToListener() throws Exception {
+        CountDownLatch assertionLatch = new CountDownLatch(1);
+        NodeClient captureClient = mock(NodeClient.class);
+        doAnswer(invocation -> {
+            ActionListener<SearchResponse> listener = invocation.getArgument(1);
+            try {
+                assertNotNull("Listener should not be null", listener);
+                assertThat(
+                    "Listener should be a PromMatrixResponseListener",
+                    listener,
+                    org.hamcrest.Matchers.instanceOf(PromMatrixResponseListener.class)
+                );
+                PromMatrixResponseListener pmrl = (PromMatrixResponseListener) listener;
+                assertFalse("includeDataSource should be false when param is false", pmrl.isIncludeDataSource());
+            } finally {
+                assertionLatch.countDown();
+            }
+            SearchResponse mockResponse = mock(SearchResponse.class);
+            listener.onResponse(mockResponse);
+            return null;
+        }).when(captureClient).search(any(SearchRequest.class), any());
+
+        FakeRestRequest request = new FakeRestRequest.Builder(xContentRegistry()).withMethod(RestRequest.Method.GET)
+            .withPath("/_m3ql")
+            .withParams(Map.of("query", "fetch service:api", "step", "10000", "include_data_source", "false"))
+            .build();
+        FakeRestChannel channel = new FakeRestChannel(request, true, 1);
+
+        action.handleRequest(request, channel, captureClient);
+
+        assertTrue("Assertion should complete within timeout", assertionLatch.await(5, TimeUnit.SECONDS));
+        assertThat(channel.capturedResponse().status(), equalTo(RestStatus.OK));
+    }
+
 }

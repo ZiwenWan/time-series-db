@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.mockito.Mockito.mock;
 
@@ -584,6 +585,109 @@ public class InternalTimeSeriesTests extends OpenSearchTestCase {
         assertTrue(jsonString.contains("timeSeries"));
         assertTrue(jsonString.contains("samples"));
         // The reduce stage may not be directly serialized in XContent, but should not cause errors
+    }
+
+    // ========== ExecStats Tests ==========
+
+    public void testGetExecStatsDefaultsToEmpty() {
+        InternalTimeSeries internal = new InternalTimeSeries(TEST_NAME, createTestTimeSeries(), TEST_METADATA);
+        assertEquals(AggregationExecStats.EMPTY, internal.getExecStats());
+    }
+
+    public void testGetExecStatsWithNonEmptyStats() {
+        AggregationExecStats stats = new AggregationExecStats(5L, 10L, 15L, 20L, 25L, 30L, 35L);
+        InternalTimeSeries internal = new InternalTimeSeries(
+            TEST_NAME,
+            createTestTimeSeries(),
+            TEST_METADATA,
+            null,
+            stats,
+            AggregationDataSource.EMPTY
+        );
+        assertEquals(stats, internal.getExecStats());
+    }
+
+    public void testReduceSumsExecStats() {
+        AggregationExecStats stats1 = new AggregationExecStats(10L, 20L, 30L, 40L, 50L, 60L, 70L);
+        AggregationExecStats stats2 = new AggregationExecStats(1L, 2L, 3L, 4L, 5L, 6L, 7L);
+
+        InternalTimeSeries agg1 = new InternalTimeSeries(TEST_NAME, List.of(), TEST_METADATA, null, stats1, AggregationDataSource.EMPTY);
+        InternalTimeSeries agg2 = new InternalTimeSeries(TEST_NAME, List.of(), TEST_METADATA, null, stats2, AggregationDataSource.EMPTY);
+
+        PipelineAggregator.PipelineTree emptyPipelineTree = new PipelineAggregator.PipelineTree(
+            Collections.emptyMap(),
+            Collections.emptyList()
+        );
+        InternalAggregation.ReduceContext finalReduceContext = InternalAggregation.ReduceContext.forFinalReduction(
+            null,
+            null,
+            (s) -> {},
+            emptyPipelineTree
+        );
+
+        InternalAggregation result = agg1.reduce(List.of(agg1, agg2), finalReduceContext);
+
+        assertTrue(result instanceof InternalTimeSeries);
+        AggregationExecStats merged = ((InternalTimeSeries) result).getExecStats();
+        assertEquals(11L, merged.seriesNumInput());
+        assertEquals(22L, merged.samplesNumInput());
+        assertEquals(33L, merged.chunksNumClosed());
+        assertEquals(44L, merged.chunksNumLive());
+        assertEquals(55L, merged.docsNumClosed());
+        assertEquals(66L, merged.docsNumLive());
+        assertEquals(77L, merged.memoryBytes());
+    }
+
+    // ========== DataSource Tests ==========
+
+    public void testGetDataSourceDefaultsToEmpty() {
+        InternalTimeSeries internal = new InternalTimeSeries(TEST_NAME, createTestTimeSeries(), TEST_METADATA);
+        assertEquals(AggregationDataSource.EMPTY, internal.getDataSource());
+    }
+
+    public void testGetDataSourceWithNonEmptySource() {
+        AggregationDataSource ds = new AggregationDataSource(
+            Set.of("prometheus"),
+            Set.of(new AggregationDataSource.IndexInfo("2d", "10s"))
+        );
+        InternalTimeSeries internal = new InternalTimeSeries(
+            TEST_NAME,
+            createTestTimeSeries(),
+            TEST_METADATA,
+            null,
+            AggregationExecStats.EMPTY,
+            ds
+        );
+        assertEquals(ds, internal.getDataSource());
+    }
+
+    public void testReduceMergesDataSource() {
+        AggregationDataSource ds1 = new AggregationDataSource(
+            Set.of("prometheus"),
+            Set.of(new AggregationDataSource.IndexInfo("2d", "10s"))
+        );
+        AggregationDataSource ds2 = new AggregationDataSource(Set.of("graphite"), Set.of(new AggregationDataSource.IndexInfo("30d", "1m")));
+
+        InternalTimeSeries agg1 = new InternalTimeSeries(TEST_NAME, List.of(), TEST_METADATA, null, AggregationExecStats.EMPTY, ds1);
+        InternalTimeSeries agg2 = new InternalTimeSeries(TEST_NAME, List.of(), TEST_METADATA, null, AggregationExecStats.EMPTY, ds2);
+
+        PipelineAggregator.PipelineTree emptyPipelineTree = new PipelineAggregator.PipelineTree(
+            Collections.emptyMap(),
+            Collections.emptyList()
+        );
+        InternalAggregation.ReduceContext finalReduceContext = InternalAggregation.ReduceContext.forFinalReduction(
+            null,
+            null,
+            (s) -> {},
+            emptyPipelineTree
+        );
+
+        InternalAggregation result = agg1.reduce(List.of(agg1, agg2), finalReduceContext);
+
+        assertTrue(result instanceof InternalTimeSeries);
+        AggregationDataSource merged = ((InternalTimeSeries) result).getDataSource();
+        assertEquals(Set.of("prometheus", "graphite"), merged.origins());
+        assertEquals(2, merged.indexes().size());
     }
 
     // ========== Helper Methods ==========

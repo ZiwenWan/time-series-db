@@ -43,17 +43,12 @@ public class Constants {
             "_toHistogramBuckets",
             "_topKPerTimestamp",
             "anomalies",
-            "asBurnRate",
-            "asMultiBurnRate",
-            "burnRate",
-            "burnRateMultiplier",
             "constantLine",
             "divideWhen",
             "histogramCDF",
             "jainCP",
             "mockFetchLinear",
             "mockFetchPeriodic",
-            "multiBurnRate",
             "nPercentile",
             "promHistogramPercentile",
             "removeAbovePercentile",
@@ -349,6 +344,11 @@ public class Constants {
         public static final String TIMESTAMP = "timestamp";
 
         /**
+         * burnRateMultiplier function name.
+         */
+        public static final String BURN_RATE_MULTIPLIER = "burnRateMultiplier";
+
+        /**
          * Functions used for value comparison.
          */
         public static class ValueFilter {
@@ -568,6 +568,27 @@ public class Constants {
              * intersect function name.
              */
             public static final String INTERSECT = "intersect";
+
+            /**
+             * asBurnRate function name (alias for burnRate).
+             */
+            public static final String AS_BURN_RATE = "asBurnRate";
+
+            /**
+             * burnRate function name.
+             */
+            public static final String BURN_RATE = "burnRate";
+
+            /**
+             * asMultiBurnRate function name (alias for multiBurnRate).
+             */
+            public static final String AS_MULTI_BURN_RATE = "asMultiBurnRate";
+
+            /**
+             * multiBurnRate function name.
+             */
+            public static final String MULTI_BURN_RATE = "multiBurnRate";
+
         }
 
         /**

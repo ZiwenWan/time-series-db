@@ -35,4 +35,18 @@ public class Utils {
         }
         return input;
     }
+
+    /**
+     * Validates that SLO is in the range (0, 100) exclusive.
+     * @param slo the SLO value to validate
+     * @throws IllegalArgumentException if slo is not in (0, 100) or is not a finite number
+     */
+    public static void validateSlo(double slo) {
+        if (!Double.isFinite(slo)) {
+            throw new IllegalArgumentException("SLO must be a finite number, got: " + slo);
+        }
+        if (slo <= 0 || slo >= 100) {
+            throw new IllegalArgumentException("SLO must be between 0 and 100 (exclusive), got: " + slo);
+        }
+    }
 }
