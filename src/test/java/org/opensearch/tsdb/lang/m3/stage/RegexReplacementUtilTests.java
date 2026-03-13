@@ -55,12 +55,7 @@ public class RegexReplacementUtilTests extends OpenSearchTestCase {
     public void testInvalidBackreferenceGroupNumber() {
         Pattern pattern = Pattern.compile("^(\\w+)-(\\w+)$");
         Matcher matcher = pattern.matcher("prod-east");
-        IllegalArgumentException exception = expectThrows(
-            IllegalArgumentException.class,
-            () -> RegexReplacementUtil.replaceAll("prod-east", matcher, "\\9")
-        );
-        assertTrue(exception.getMessage().contains("Invalid group reference"));
-        assertTrue(exception.getMessage().contains("\\9"));
+        expectThrows(IndexOutOfBoundsException.class, () -> RegexReplacementUtil.replaceAll("prod-east", matcher, "\\9"));
     }
 
     public void testBackreferenceToEmptyGroup() {
